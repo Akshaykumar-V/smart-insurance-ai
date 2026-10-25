@@ -1,0 +1,4 @@
+import type { Metadata } from "next";
+import "./globals.css";
+export const metadata: Metadata = { title: "Coverly | Insurance Wallet", description: "A fictional insurance wallet. Smart Insurance Wallet hackathon proof-of-concept." };
+export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) { return <html lang="en"><body>{children}</body></html>; }
