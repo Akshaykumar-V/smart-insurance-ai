@@ -7,7 +7,7 @@
                     "build":  "next build",
                     "start":  "next start",
                     "typecheck":  "tsc --noEmit",
-                    "test":  "tsx --test lib/policies.test.ts lib/upload.test.ts"
+                    "test":  "tsx --test lib/policies.test.ts lib/upload.test.ts lib/intelligence.test.tsx"
                 },
     "dependencies":  {
                          "next":  "^15.5.0",
