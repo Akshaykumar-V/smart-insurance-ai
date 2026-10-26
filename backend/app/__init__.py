@@ -1,0 +1,1 @@
+"""Smart Insurance hackathon backend."""

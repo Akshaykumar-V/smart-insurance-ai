@@ -1,0 +1,4 @@
+.python-runtime/
+.uv-cache/
+.env.*
+!.env.example
