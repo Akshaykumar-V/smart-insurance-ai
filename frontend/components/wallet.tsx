@@ -1,9 +1,11 @@
-﻿"use client";
-import { useEffect, useRef, useState } from "react";
-import { ArrowDownToLine, ArrowRight, Car, Check, ChevronRight, FileText, Heart, House, Info, LayoutGrid, Leaf, LifeBuoy, Plus, Search, ShieldCheck, Sparkles, WalletCards, X } from "lucide-react";
+"use client";
+import { useEffect, useState } from "react";
+import { ArrowRight, Car, Check, ChevronRight, FileText, Heart, House, Info, LayoutGrid, Leaf, LifeBuoy, Plus, Search, ShieldCheck, Sparkles, WalletCards } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { formatDate, formatMoney, type InsuranceCategory, type PolicyCard as Policy } from "@/lib/policies";
 import { mockWalletClient, type WalletClient } from "@/lib/wallet-client";
+import { UploadDialog } from "@/components/upload-dialog";
+import type { UploadClient } from "@/lib/upload-contract";
 const categories: { id: InsuranceCategory | "all"; label: string; icon: LucideIcon }[] = [{ id: "all", label: "All policies", icon: LayoutGrid }, { id: "health", label: "Health", icon: Heart }, { id: "life", label: "Life", icon: Leaf }, { id: "vehicle", label: "Vehicle", icon: Car }, { id: "animal", label: "Animal", icon: ShieldCheck }, { id: "property", label: "Property", icon: House }, { id: "other", label: "Other", icon: FileText }];
 const statusLabels = { not_started: "Not analyzed", processing: "Processing documents", ready: "Analysis available", needs_review: "Review needed", failed: "Processing failed", unsupported: "Wallet only" };
 function PolicyCard({ policy }: { policy: Policy }) {
@@ -18,12 +20,7 @@ function PolicyCard({ policy }: { policy: Policy }) {
   <div className="card-foot">{health ? <><FileText size={15} /><span>{policy.needs_review ? "Schedule & applicability need review" : "Extracting policy information"}</span></> : <><Info size={15} /><span>Specialized analysis unavailable</span></>}</div>
  </article>;
 }
-function UploadDialog({ close }: { close: () => void }) {
- const ref = useRef<HTMLDialogElement>(null);
- useEffect(() => { const dialog = ref.current; dialog?.showModal(); return () => dialog?.close(); }, []);
- return <dialog ref={ref} onCancel={close} onClick={e => { if (e.target === e.currentTarget) close(); }} aria-labelledby="upload-title"><div className="dialog-top"><span className="policy-icon health"><ArrowDownToLine /></span><button className="icon-button" onClick={close} aria-label="Close upload information"><X /></button></div><h2 id="upload-title">A home for your policy PDFs</h2><p>Document upload is the next milestone. This wallet currently uses fictional demo policies; files cannot be uploaded yet.</p><div className="dialog-note"><FileText size={20} /><span>The upcoming flow will accept policy wording, schedules, CIS documents and endorsements.</span></div><p className="muted">Deep analysis is limited to individual and family-floater indemnity health insurance. A policy schedule may be needed to establish applicability.</p><button className="button primary" onClick={close}>Back to wallet <ArrowRight size={16} /></button></dialog>;
-}
-export function Wallet({ client = mockWalletClient }: { client?: WalletClient }) {
+export function Wallet({ client = mockWalletClient, uploadClient }: { client?: WalletClient; uploadClient?: UploadClient }) {
  const [policies, setPolicies] = useState<Policy[]>([]);
  const [loading, setLoading] = useState(true);
  const [error, setError] = useState("");
@@ -40,5 +37,5 @@ export function Wallet({ client = mockWalletClient }: { client?: WalletClient })
  <section aria-labelledby="policies-title" className="policies-section"><div className="section-heading"><h2 id="policies-title">Your policies <span>{loading || error ? "—" : policies.length}</span></h2><label className="search"><Search size={17} /><input aria-label="Search policies by name or insurer" placeholder="Search policies…" value={query} onChange={e => setQuery(e.target.value)} /></label></div><div className="filters" role="group" aria-label="Filter policies by category">{categories.map(c => <button key={c.id} aria-pressed={category === c.id} className={category === c.id ? "active" : ""} onClick={() => setCategory(c.id)}><c.icon size={15} />{c.label}</button>)}</div>
  {loading ? <div className="policy-grid" role="status" aria-label="Loading policies">{[1, 2, 3].map(n => <div className="skeleton" key={n}><div /><div /><div /><div /></div>)}<span className="sr-only">Loading policies</span></div> : error ? <div className="empty-state" role="alert"><Info /><h3>We couldn’t load your wallet</h3><p>{error}</p><button className="button primary" onClick={() => setAttempt(a => a + 1)}>Try again</button></div> : visible.length === 0 ? <div className="empty-state"><WalletCards size={32} /><h3>{query ? "No matching policies" : "A little room for peace of mind"}</h3><p>{query ? "Try a different policy name or insurer." : "No policies in this category yet. Add a policy to get started."}</p><button className="button secondary" onClick={() => { setQuery(""); setCategory("all"); }}>Show all policies</button><button className="button primary" onClick={() => setUpload(true)}><Plus size={16} />Add policy</button></div> : <div className="policy-grid">{visible.map(p => <PolicyCard key={p.id} policy={p} />)}<button className="add-card" onClick={() => setUpload(true)}><span><Plus size={24} /></span><strong>Make room for your next policy</strong><p>Keep every policy within reach.</p><b>Add policy <ArrowRight size={15} /></b></button></div>}</section>
  <section className="scope-note" id="scope"><Info size={19} /><div><h3>Built for clarity. Grounded in your documents.</h3><p>Advanced AI claim analysis supports only individual and family-floater indemnity health insurance. Other categories are wallet-only. Analysis availability does not verify coverage or claim applicability.</p></div></section><footer><span><ShieldCheck size={14} />Smart Insurance Wallet · Hackathon proof-of-concept</span><span>All policies and amounts shown are fictional demo data.</span></footer>
- </main></div>{upload && <UploadDialog close={() => setUpload(false)} />}</div>;
+ </main></div><UploadDialog open={upload} close={() => setUpload(false)} policies={policies} client={uploadClient} /></div>;
 }
