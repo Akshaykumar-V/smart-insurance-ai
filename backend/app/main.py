@@ -18,7 +18,13 @@ from app.analysis import FindingsResponse, OpenAIExtractor, analyze_job
 from app.config import Settings
 from app.diagnostics import request_id_context
 from app.errors import ApiError
-from app.models import DocumentType, JobResponse, UploadResponse
+from app.models import (
+    DocumentType,
+    JobResponse,
+    PolicyDetails,
+    PolicyListResponse,
+    UploadResponse,
+)
 from app.pdf import parse_isolated
 from app.supabase import Principal, SupabaseGateway
 
@@ -193,6 +199,10 @@ def create_app(settings: Settings | None = None, gateway=None, extractor=None) -
     async def health():
         return {"status": "ok", "version": "0.1.0"}
 
+    @app.get("/api/v1/policies", response_model=PolicyListResponse)
+    async def policies(principal: Annotated[Principal, Depends(current_user)]):
+        return await app.state.gateway.list_policies(principal)
+
     @app.post("/api/v1/policies/upload", status_code=202, response_model=UploadResponse)
     async def upload(
         request: Request,
@@ -248,6 +258,12 @@ def create_app(settings: Settings | None = None, gateway=None, extractor=None) -
         request: Request, job_id: str, principal: Annotated[Principal, Depends(current_user)]
     ):
         return await request.app.state.gateway.get_job(principal, job_id)
+
+    @app.get("/api/v1/policies/{policy_id}", response_model=PolicyDetails)
+    async def policy(
+        request: Request, policy_id: str, principal: Annotated[Principal, Depends(current_user)]
+    ):
+        return await request.app.state.gateway.get_policy(principal, policy_id)
 
     @app.get("/api/v1/policies/{policy_id}/findings", response_model=FindingsResponse)
     async def findings(

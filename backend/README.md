@@ -1,9 +1,9 @@
-# PDF ingestion backend — milestone 1
+# Smart Insurance API backend
 
 Hackathon proof-of-concept, not a production insurance or claim-processing service.
-Only PDF upload, page text extraction, and ingestion job tracking are implemented.
-There are no OpenAI calls, AI policy interpretation, embeddings, RAG, claim calculations,
-OCR, or insurer decisions in this milestone.
+The backend provides authenticated policy reads, PDF ingestion, and bounded AI extraction
+of two clause types. It does not calculate claims or make insurer decisions. Embeddings,
+hybrid retrieval, OCR, and policy list/detail writes are not implemented.
 
 ## Local setup
 
@@ -48,8 +48,71 @@ For commands in this repository's Codex environment, prepend `rtk proxy` per `RT
 | Method and path | Behavior |
 | --- | --- |
 | `GET /api/v1/health` | Public; `200 {"status":"ok","version":"0.1.0"}` |
+| `GET /api/v1/policies` | Authenticated; returns the caller's policy cards and `next_cursor: null` |
+| `GET /api/v1/policies/{policy_id}` | Authenticated; returns one owned policy with minimal document metadata; missing/foreign IDs return 404 |
 | `POST /api/v1/policies/upload` | Authenticated multipart; returns the exact v0.1 `202` ID envelope |
 | `GET /api/v1/jobs/{job_id}` | Authenticated and owner-scoped; returns v0.1 job status/stage/error |
+| `GET /api/v1/policies/{policy_id}/findings` | Authenticated and owner-scoped; returns the policy's evidence-backed findings |
+
+### Policy read response contracts
+
+`GET /api/v1/policies` returns only policies owned by the authenticated user. An empty
+wallet is `{"items":[],"next_cursor":null}`. The current backend loads all owner rows
+internally and returns `next_cursor: null`.
+
+```json
+{
+  "items": [{
+    "id": "pol_demo_001",
+    "category": "health",
+    "policy_type": "family_floater",
+    "insurer": "Fictional Health Insurer",
+    "product_name": "Demo Family Cover",
+    "sum_insured_paise": 50000000,
+    "start_date": null,
+    "end_date": null,
+    "analysis_status": "needs_review",
+    "needs_review": true
+  }],
+  "next_cursor": null
+}
+```
+
+`GET /api/v1/policies/{policy_id}` returns this card metadata plus policy details and
+minimal document metadata. `needs_review` is true when `analysis_status` is
+`needs_review`. The current schema does not store insured-member records, so
+`insured_members` is `[]`; unknown schedule fields remain null.
+
+```json
+{
+  "id": "pol_demo_001",
+  "category": "health",
+  "policy_type": "family_floater",
+  "insurer": "Fictional Health Insurer",
+  "product_name": "Demo Family Cover",
+  "uin": null,
+  "policyholder_name": null,
+  "sum_insured_paise": 50000000,
+  "start_date": null,
+  "end_date": null,
+  "insured_members": [],
+  "analysis_status": "needs_review",
+  "needs_review": true,
+  "documents": [{
+    "id": "doc_demo_001",
+    "type": "policy_wording",
+    "name": "demo-wording.pdf",
+    "page_count": 2,
+    "processing_status": "needs_review"
+  }]
+}
+```
+
+These responses match `PolicyCard`, `PolicyDetails`, and `PolicyDocument` in
+`../frontend_api_types.ts`. Monetary values are integer paise; dates are ISO `YYYY-MM-DD`
+or null. Document `name` maps to stored `file_name`. Storage paths, checksums, owner
+IDs, and extracted page text are not returned. Invalid, missing, and foreign policy IDs
+all receive the standard 404 `NOT_FOUND` envelope.
 
 Upload accepts `file`, optional `policy_id`, and optional `document_type_hint`:
 `policy_wording`, `policy_schedule`, `cis`, `endorsement`, or `other`.
@@ -76,10 +139,10 @@ Upload response:
 ```
 
 The job progresses `queued/uploaded` → `processing/extracting` →
-`needs_review/extracting` after text extraction. Its message explicitly states that AI
-analysis is not implemented. Parsing failures end as `failed/extracting` with a safe
-error. The frontend can stop polling at either terminal state. No invented progress
-percentages, findings, or completed-analysis statuses are returned.
+`needs_review/extracting` after text extraction if AI is disabled. With AI enabled after
+migration 004, jobs proceed through `processing/analyzing` to `needs_review/verifying`.
+Parsing and AI failures return a safe error. No invented progress percentages or claim
+decisions are returned.
 
 Extracted text is persisted in `document_pages`, including blank pages. The first
 physical PDF page is `page_number=1`, regardless of printed page labels. Text is not
@@ -89,9 +152,10 @@ trimmed, summarized, or rewritten. `method=pymupdf` and `extraction_quality` is 
 - `no_text`: no non-whitespace text was extracted; the page may be blank or scanned.
 - `needs_review`: replacement or NUL characters indicate questionable extraction.
 
-The public contract has no raw-page-text endpoint or upload text field, so none was
-added. Page rows are available to subsequent backend stages and owner-scoped database
-inspection. AI interpretation and calculations are absent.
+The API has no raw-page-text endpoint or upload text field. Page rows remain available
+to subsequent backend stages and owner-scoped database inspection. AI interpretation is
+limited to the supported extraction behavior in [AI_EXTRACTION.md](AI_EXTRACTION.md);
+no claim calculations are performed.
 
 ## Validation, auth, and limits
 
@@ -141,18 +205,14 @@ with missing configuration fails rather than silently skipping. To force offline
 execution regardless of environment, run `pytest -q -m "not live"`.
 
 Local acceptance: tests/lint/format pass, physical page numbering is preserved, and
-responses conform to the three implemented v0.1 endpoints. Integration acceptance
+responses conform to the implemented v0.1 endpoints. Integration acceptance
 additionally requires the live test against the migration. See `MILESTONE_1_STATUS.md`
 for tests actually executed in this workspace.
 
 ## Known limitations and documentation reconciliation
 
-- `START_HERE.md` describes a broader checkpoint ending with a co-payment finding.
-  This milestone intentionally stops at text extraction as requested. AI analysis
-  normally triggered by upload is deferred; terminal `needs_review` communicates this.
-- `API_CONTRACT.md` defines ID/job responses, not a page-text response. No public
-  fields, paths, status enums, auth rules, or numbering were changed. Shared docs and
-  frontend types were not edited. This is partial implementation of the contract.
+- `API_CONTRACT.md` remains the shared API source of truth. The existing policy
+  list/detail response shapes are implemented; no contract fields or enums changed.
 - Limits, extraction-quality labels, database RPCs, and intermediate document statuses
   were unspecified; the choices above are backend implementation details.
 - FastAPI background tasks are process-local, not a durable queue. A restart or token
@@ -166,8 +226,8 @@ for tests actually executed in this workspace.
 - Parser subprocesses isolate crashes and enforce timeouts, but do not provide a full
   hostile-file sandbox or hard per-process memory limit. Restrict this prototype to
   fictional/public PDFs; production needs worker resource and concurrency controls.
-- OpenAI, pgvector, retrieval, classification, evidence APIs, and simulations are
-  deferred. Their packages and tables are not installed prematurely.
+- pgvector, hybrid retrieval, policy list/detail writes, evidence PDF access, and
+  simulations remain deferred.
 
 Implementation references: [PyMuPDF document checks](https://pymupdf.readthedocs.io/en/latest/document.html),
 [page text extraction](https://pymupdf.readthedocs.io/en/latest/page.html),

@@ -10,7 +10,17 @@ from app.analysis import Finding, FindingsResponse
 from app.config import Settings
 from app.diagnostics import Operation, log_upstream_failure, safe_upstream_code
 from app.errors import ApiError
-from app.models import ExtractedPage, JobError, JobResponse, ParsedPdf, UploadResponse
+from app.models import (
+    ExtractedPage,
+    JobError,
+    JobResponse,
+    ParsedPdf,
+    PolicyCard,
+    PolicyDetails,
+    PolicyDocument,
+    PolicyListResponse,
+    UploadResponse,
+)
 
 logger = logging.getLogger(__name__)
 BUCKET = "policy-documents"
@@ -112,6 +122,92 @@ class SupabaseGateway:
         )
         if not response.json():
             raise ApiError(404, "NOT_FOUND", "Policy not found.")
+
+    async def list_policies(self, principal: Principal) -> PolicyListResponse:
+        items = []
+        offset = 0
+        while True:
+            response = await self.request(
+                "GET",
+                "/rest/v1/policies",
+                principal.token,
+                operation=Operation.POLICY_LIST,
+                params={
+                    "owner_id": f"eq.{principal.user_id}",
+                    "select": (
+                        "id,category,policy_type,insurer,product_name,sum_insured_paise,"
+                        "start_date,end_date,analysis_status"
+                    ),
+                    "order": "created_at.desc,id.desc",
+                    "limit": 100,
+                    "offset": offset,
+                },
+            )
+            rows = response.json()
+            items.extend(
+                PolicyCard(
+                    **row,
+                    needs_review=row["analysis_status"] == "needs_review",
+                )
+                for row in rows
+            )
+            if len(rows) < 100:
+                break
+            offset += len(rows)
+        return PolicyListResponse(items=items, next_cursor=None)
+
+    async def get_policy(self, principal: Principal, policy_id: str) -> PolicyDetails:
+        try:
+            UUID(policy_id)
+        except ValueError:
+            raise ApiError(404, "NOT_FOUND", "Policy not found.") from None
+        response = await self.request(
+            "GET",
+            "/rest/v1/policies",
+            principal.token,
+            operation=Operation.POLICY_DETAIL,
+            params={
+                "id": f"eq.{policy_id}",
+                "owner_id": f"eq.{principal.user_id}",
+                "select": (
+                    "id,category,policy_type,insurer,product_name,uin,policyholder_name,"
+                    "sum_insured_paise,start_date,end_date,analysis_status"
+                ),
+                "limit": 1,
+            },
+        )
+        policies = response.json()
+        if not policies:
+            raise ApiError(404, "NOT_FOUND", "Policy not found.")
+        row = policies[0]
+
+        documents_response = await self.request(
+            "GET",
+            "/rest/v1/documents",
+            principal.token,
+            operation=Operation.DOCUMENT_LIST,
+            params={
+                "policy_id": f"eq.{policy_id}",
+                "owner_id": f"eq.{principal.user_id}",
+                "select": "id,type,file_name,page_count,processing_status",
+                "order": "created_at.asc,id.asc",
+            },
+        )
+        return PolicyDetails(
+            **row,
+            needs_review=row["analysis_status"] == "needs_review",
+            insured_members=[],
+            documents=[
+                PolicyDocument(
+                    id=document["id"],
+                    type=document["type"],
+                    name=document["file_name"],
+                    page_count=document["page_count"],
+                    processing_status=document["processing_status"],
+                )
+                for document in documents_response.json()
+            ],
+        )
 
     async def create_upload(
         self,

@@ -13,6 +13,9 @@ logger = logging.getLogger("app.supabase")
 class Operation(StrEnum):
     AUTH_USER = "auth_user"
     POLICY_LOOKUP = "policy_lookup"
+    POLICY_LIST = "policy_list"
+    POLICY_DETAIL = "policy_detail"
+    DOCUMENT_LIST = "document_list"
     STORAGE_UPLOAD = "storage_upload"
     CREATE_UPLOAD = "create_pdf_upload"
     STORAGE_CLEANUP = "storage_cleanup"
