@@ -1,2 +1,2 @@
-import { Wallet } from "@/components/wallet";
-export default function Page() { return <Wallet />; }
+import { AppEntry } from "@/components/app-entry";
+export default function Page() { return <AppEntry />; }

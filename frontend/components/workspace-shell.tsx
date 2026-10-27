@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ChevronRight, Info, LifeBuoy, ShieldCheck, Sparkles, WalletCards } from "lucide-react";
-import type { ReactNode } from "react";
+import React, { type ReactNode } from "react";
 
 export function WorkspaceShell({ children, section = "Insurance wallet", mode = "mock" }: { children: ReactNode; section?: string; mode?: "mock" | "api" }) {
   const demo = mode === "mock";
@@ -20,7 +20,7 @@ export function WorkspaceShell({ children, section = "Insurance wallet", mode = 
       </div>
     </aside>
     <div className="main-shell">
-      <header className="topbar"><span>Workspace <ChevronRight size={14} /><b>{section}</b></span><span className="demo-pill"><span />{demo ? "Demo mode" : "API mode"}</span></header>
+      <header className="topbar"><span>Workspace <ChevronRight size={14} /><b>{section}</b></span><span className="demo-pill"><span />{demo ? "DEMO mode" : "LIVE mode"}</span></header>
       <main id="main">
         {children}
         <section className="scope-note" id="scope"><Info size={19} /><div><h3>Built for clarity. Grounded in your documents.</h3><p>Advanced AI claim analysis supports only individual and family-floater indemnity health insurance. Other categories are wallet-only. Analysis availability does not verify coverage or claim applicability.</p></div></section>

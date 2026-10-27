@@ -1,6 +1,6 @@
-import { PolicyWorkspace } from "@/components/policy-workspace";
+import { AppEntry } from "@/components/app-entry";
 
 export default async function PolicyPage({ params }: { params: Promise<{ policyId: string }> }) {
   const { policyId } = await params;
-  return <PolicyWorkspace key={policyId} policyId={policyId} view="details" />;
+  return <AppEntry route={{ policyId, view: "details" }} />;
 }

@@ -4,7 +4,7 @@ Next.js App Router, TypeScript, Tailwind CSS. All displayed policies are fiction
 
 ## Run
 
-From `frontend/` with Node.js 20.9+ (Node.js 22 LTS recommended):
+From `frontend/` with Node.js 22+ (required by the pinned Supabase SDK):
 
 ```sh
 npm ci
@@ -12,6 +12,12 @@ npm run dev
 ```
 
 Open http://localhost:3000. For a production server: `npm run build` then `npm start`.
+
+## Authentication and live uploads (milestone 5A)
+
+Demo remains the default. See [INTEGRATION_STATUS.md](INTEGRATION_STATUS.md) for configuration, endpoint gates, exact simulator schema differences and verification limits. `NEXT_PUBLIC_APP_MODE=live` selects the email/password sign-in flow and authenticated upload/job adapters. This is a build-time switch; restart/rebuild after changing public variables. Live mode never fills missing responses with demo fixtures.
+
+The local ignored `frontend/.env.local` contains the user-supplied project URL and `demo` mode. The public key and Laptop 1 backend origin remain blank. Supply `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (or legacy `NEXT_PUBLIC_SUPABASE_ANON_KEY`) and `NEXT_PUBLIC_BACKEND_ORIGIN` locally before enabling live mode. Do not commit environment files or credentials. Laptop 2 must use Laptop 1's reachable LAN origin, not Laptop 2's localhost. Keep `NEXT_PUBLIC_POLICY_READS_ENABLED=false` while the policy-detail endpoint is missing.
 
 ## Checks
 
@@ -23,7 +29,7 @@ npm run build
 
 ## Scope
 
-Wallet: category filters, search, policy cards, loading skeletons, empty/error states and responsive navigation. Add policy opens the document upload dialog. View policy details opens a policy's metadata, members and document list; AI findings opens its six-category intelligence report. Source reference buttons open a reference placeholder. **Simulate Claim Impact** expands the fictional simulator within an available policy report. Authentication and the full PDF viewer remain deferred.
+Demo wallet: category filters, search, policy cards, loading skeletons, empty/error states and responsive navigation. Add policy opens the document upload dialog. View policy details opens a policy's metadata, members and document list; AI findings opens its six-category intelligence report. Source reference buttons open a reference placeholder. **Simulate Claim Impact** expands the fictional simulator within an available demo report. Email/password authentication is implemented for explicit live mode; the full PDF viewer remains deferred.
 
 `components/wallet.tsx` uses `mockWalletClient` by default. Shared types are imported from `../frontend_api_types.ts`; API v0.1 is unchanged. Runtime validation rejects incompatible responses. Unknown schedule values remain null and render as unknown. Milestone 4's explicit user request authorizes isolated, deterministic TypeScript calculations for the fictional simulator, overriding the earlier frontend-no-calculations guideline for this scope. Live policy arithmetic remains server-owned; the local model is not a fallback for live data.
 
@@ -31,11 +37,11 @@ Wallet: category filters, search, policy cards, loading skeletons, empty/error s
 
 `lib/wallet-client.ts` centralizes adapters and exposes an opt-in real client for the documented authenticated `GET /api/v1/policies`. Supply a FastAPI origin and a Supabase access-token provider; configure backend CORS. The default demo makes no network calls. This milestone does not verify backend availability.
 
-`lib/upload-client.ts` exposes `createApiUploadClient(baseUrl, getAccessToken)` for the documented `POST /api/v1/policies/upload` and `GET /api/v1/jobs/{job_id}`. Pass this adapter as the `uploadClient` prop to `Wallet`, alongside the real wallet client when integration is ready. The UI does not implement sign-in or hold a hard-coded token. The backend must enforce authentication, ownership, private storage, PDF parsing and its actual size/page limits. Configure CORS for the frontend origin. No backend endpoints were exercised in this milestone; adapter tests stub `fetch`.
+`lib/upload-client.ts` exposes `createApiUploadClient(baseUrl, getAccessToken)` for the documented `POST /api/v1/policies/upload` and `GET /api/v1/jobs/{job_id}`. Milestone 5A's `LiveWorkspace` supplies this adapter to the existing upload dialog after sign-in, with a current-token callback and session-scoped cancellation. It does not request a wallet list. The backend must enforce authentication, ownership, private storage, PDF parsing and its actual size/page limits. Configure CORS for the frontend origin. No real backend endpoints were exercised in this frontend milestone; adapter tests stub `fetch`.
 
 Deep analysis is restricted to individual/family-floater indemnity health insurance. Category and policy type alone do not confirm indemnity eligibility; await backend classification. No pagination UI is implemented yet; the mock list has a null cursor.
 
-`lib/policy-client.ts` exposes `createApiPolicyClient(baseUrl, getAccessToken)` for `GET /api/v1/policies/{policy_id}` and `GET /api/v1/policies/{policy_id}/findings`. The two Next.js policy routes currently use the mock adapter; supply a real client to `PolicyWorkspace` when integrating authentication. The client validates the response shape and requested policy ID, encodes opaque IDs, forwards bearer tokens, uses a 30-second timeout, and handles 401/403/404/429/server errors without displaying raw server bodies. It never calls a document-access or simulation endpoint in this milestone.
+`lib/policy-client.ts` exposes `createApiPolicyClient(baseUrl, getAccessToken)` for `GET /api/v1/policies/{policy_id}` and `GET /api/v1/policies/{policy_id}/findings`. The two Next.js policy routes use mock data only in demo mode. Live mode requires authentication and an explicit policy-read capability setting, currently disabled because policy details are not implemented. The client validates the response shape and requested policy ID, encodes opaque IDs, forwards bearer tokens, uses a 30-second timeout, and handles 401/403/404/429/server errors without displaying raw server bodies. It never calls a document-access or simulation endpoint in this milestone.
 
 The backend must classify analysis eligibility, report authoritative analysis statuses, scope documents/findings to the authenticated owner and return 1-indexed source pages with exact quotes. The v0.1 policy type does not independently encode indemnity eligibility. The frontend blocks non-health, unsupported and unknown/other policy types, and fetches findings only for `ready` or `needs_review` policies; backend eligibility enforcement is still required.
 

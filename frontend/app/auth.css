@@ -1,0 +1,8 @@
+.live-panel { border: 1px solid var(--border); background: white; border-radius: 12px; padding: 24px; margin: 20px 0; overflow-wrap: anywhere; }
+.live-panel h1 { font-size: 25px; margin-bottom: 16px; }
+.live-panel h2 { font-size: 19px; margin-bottom: 16px; }
+.live-panel p { line-height: 1.8; margin: 12px 0; }
+.live-auth-form { display: grid; gap: 12px; max-width: 420px; margin: 20px 0; }
+.live-auth-form input { border: 1px solid var(--border); border-radius: 6px; padding: 12px; font-size: 16px; min-height: 44px; }
+.live-auth-form input:focus-visible { outline: 3px solid #45a78c; outline-offset: 2px; }
+.live-account { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; padding: 12px 0; font-size: 13px; }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, CheckCircle2, FileText, Info, LoaderCircle, UploadCloud, X } from "lucide-react";
 import type { PolicyCard } from "../../frontend_api_types";
 import { createMockUploadClient, type DemoOutcome } from "@/lib/mock-upload-client";
@@ -21,9 +21,11 @@ interface Props {
   close: () => void;
   policies: PolicyCard[];
   client?: UploadClient;
+  onAccepted?: (receipt: UploadResponse) => void;
+  onJob?: (job: JobResponse) => void;
 }
 
-export function UploadDialog({ open, close, policies, client: suppliedClient }: Props) {
+export function UploadDialog({ open, close, policies, client: suppliedClient, onAccepted, onJob }: Props) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const operation = useRef<AbortController | null>(null);
@@ -80,7 +82,7 @@ export function UploadDialog({ open, close, policies, client: suppliedClient }: 
     setError("");
     setRetryNotice("");
     try {
-      await pollJob(client, accepted, controller.signal, setJob, setRetryNotice);
+      await pollJob(client, accepted, controller.signal, value => { setJob(value); onJob?.(value); }, setRetryNotice);
       if (!controller.signal.aborted) setPhase("terminal");
     } catch (failure) {
       if (!controller.signal.aborted) {
@@ -107,6 +109,7 @@ export function UploadDialog({ open, close, policies, client: suppliedClient }: 
       if (controller.signal.aborted) return;
       setReceipt(accepted);
       setSessionPolicyId(accepted.policy_id);
+      onAccepted?.(accepted);
       setFile(null); // Release the selected file after acceptance; retain only its display name.
       await track(accepted, controller);
     } catch (failure) {
@@ -195,7 +198,7 @@ export function UploadDialog({ open, close, policies, client: suppliedClient }: 
         {!suppliedClient && <div className="demo-controls"><label htmlFor="demo-outcome">Demo scenario</label><select id="demo-outcome" value={outcome} onChange={event => setOutcome(event.target.value as DemoOutcome)}>{Object.entries(outcomeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><small>This selects a fictional outcome; it does not inspect your document.</small></div>}
       </fieldset>
       {validating && <p role="status">Checking the file header…</p>}
-      {error && <div className="upload-error" role="alert"><AlertCircle size={18} /><div>{error}{phase === "upload_error" && !demo && <p>Acceptance is unconfirmed. A lost response can leave an uploaded document on the server. Check your wallet before sending again to avoid duplicates.</p>}</div></div>}
+      {error && <div className="upload-error" role="alert"><AlertCircle size={18} /><div>{error}{phase === "upload_error" && !demo && <p>Acceptance is unconfirmed. A lost response can leave an uploaded document on the server. Confirm with the backend operator before sending again; the live wallet list is not available yet.</p>}</div></div>}
       <p className="upload-hint">A PDF header check cannot confirm readable text. Scanned, encrypted or damaged PDFs may require review or be rejected by the backend.</p>
       <button className="button primary upload-submit" type="submit" disabled={!file || validating}>
         <UploadCloud size={17} />{phase === "upload_error" ? (demo ? "Retry demo upload" : "Send PDF again") : demo ? "Run demo upload" : "Upload PDF"}
@@ -208,7 +211,7 @@ export function UploadDialog({ open, close, policies, client: suppliedClient }: 
       <p className="processing-filename">{fileName}</p>
       {phase === "uploading" && <><progress aria-label={demo ? "Simulated upload in progress" : "Upload awaiting server confirmation"} /><p>{demo ? "Rehearsing the upload flow. No data is being sent." : "Sending the file and waiting for server acceptance. Transfer percentage is unavailable."}</p></>}
       {receipt && <>
-        <dl className="job-details"><div><dt>{demo ? "Demo job" : "Job ID"}</dt><dd>{receipt.job_id}</dd></div><div><dt>Latest {demo ? "simulated" : "reported"} stage</dt><dd>{job ? stageLabels[job.stage] : "Awaiting first status update"}</dd></div><div><dt>Job status</dt><dd>{job?.status.replaceAll("_", " ") ?? "queued"}{demo ? " (simulated)" : ""}</dd></div></dl>
+        <dl className="job-details"><div><dt>Policy ID</dt><dd>{receipt.policy_id}</dd></div><div><dt>{demo ? "Demo job" : "Job ID"}</dt><dd>{receipt.job_id}</dd></div><div><dt>Latest {demo ? "simulated" : "reported"} stage</dt><dd>{job ? stageLabels[job.stage] : "Awaiting first status update"}</dd></div><div><dt>Job status</dt><dd>{job?.status.replaceAll("_", " ") ?? "queued"}{demo ? " (simulated)" : ""}</dd></div></dl>
         {job?.message && <p className="job-message">{job.message}</p>}
         {job?.error && <div className="upload-error" role="alert"><AlertCircle size={18} /><div><strong>{job.error.code}</strong><p>{job.error.message}</p></div></div>}
         {job?.status === "failed" && <p>The job has stopped. You can upload another document; restarting this job is not available.</p>}

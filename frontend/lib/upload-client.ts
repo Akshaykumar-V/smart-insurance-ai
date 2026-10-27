@@ -8,7 +8,7 @@ export function createUploadForm(input: UploadInput): FormData {
   return body;
 }
 
-// Integration seam only. Authentication UI/session management is outside this milestone.
+// Authentication is supplied by the caller; this adapter never caches a token.
 export function createApiUploadClient(baseUrl: string, getAccessToken: () => Promise<string>): UploadClient {
   const origin = baseUrl.replace(/\/$/, "");
   async function request(path: string, signal: AbortSignal, body?: FormData): Promise<unknown> {
@@ -41,7 +41,7 @@ export function createApiUploadClient(baseUrl: string, getAccessToken: () => Pro
           if (typeof data?.error?.code === "string") code = data.error.code;
           if (!messages[response.status] && typeof data?.error?.message === "string") message = data.error.message;
         } catch { /* Keep the safe fallback for non-JSON errors. */ }
-        throw new UploadError(message, response.status === 429 || response.status >= 500, code);
+        throw new UploadError(message, response.status === 429 || response.status >= 500, code, response.status);
       }
       if (response.status !== (body ? 202 : 200)) throw new UploadError("The server returned an unexpected status. The operation is unconfirmed.");
       try { return await response.json(); }

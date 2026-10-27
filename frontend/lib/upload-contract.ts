@@ -36,7 +36,7 @@ export interface UploadClient {
 }
 
 export class UploadError extends Error {
-  constructor(message: string, readonly retryable = false, readonly code?: string) {
+  constructor(message: string, readonly retryable = false, readonly code?: string, readonly status?: number) {
     super(message);
     this.name = "UploadError";
   }
