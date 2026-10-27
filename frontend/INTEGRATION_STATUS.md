@@ -1,6 +1,6 @@
-# Frontend milestone 5A — October 27, 2026
+# Frontend policy read integration — October 27, 2026
 
-Branch: `feature/frontend`; baseline simulator commit `6a5af99`. Hackathon proof-of-concept with a hard development deadline of October 28, 2026. No backend or shared API contract edits. The pre-existing uncommitted `TASK_BOARD.md` update is preserved.
+Branch: `feature/frontend`, based on `origin/feature/frontend` at `e4cd714`. Backend policy-read milestone is present on `origin/feature/ai-backend` at `0e5e5a8a217bfb75b1f5f7aff3cec6263454e765`. Hackathon proof-of-concept with a hard development deadline of October 28, 2026. No backend or shared API contract edits. Frontend integration tests stub HTTP; live endpoint behavior has not been independently exercised from this worktree.
 
 ## Configuration
 
@@ -12,7 +12,7 @@ Set these public variables in ignored `frontend/.env.local`. No environment file
 | `NEXT_PUBLIC_SUPABASE_URL` | Existing Supabase project origin; supplied by the user and placed in the local ignored file. |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Required public publishable key, still awaiting user configuration. A legacy public anon key may instead use `NEXT_PUBLIC_SUPABASE_ANON_KEY`. Secret/service-role keys are rejected; never place them in any public variable. |
 | `NEXT_PUBLIC_BACKEND_ORIGIN` | Required reachable origin, with no `/api/v1` suffix. Same-machine development may use `http://127.0.0.1:8000`; Laptop 2 must use Laptop 1's actual private LAN IP and port 8000. No LAN address is assumed. |
-| `NEXT_PUBLIC_POLICY_READS_ENABLED` | Default `false`. Keep false for the currently confirmed backend. Enable only after both policy-detail and findings endpoints are implemented and verified compatible with v0.1. |
+| `NEXT_PUBLIC_POLICY_READS_ENABLED` | Default `false`. Set `true` to opt into authenticated wallet list, policy details and findings using API contract v0.1. |
 
 Public variables are bundled at build time. Restart development or rebuild production after changes. Supabase uses HTTPS; backend HTTPS is supported, and HTTP localhost/private IPv4 LAN origins are accepted for this development prototype. Use HTTPS for shared deployment. Laptop 1 must listen on a reachable interface, allow port 8000 through its firewall, and configure CORS to include Laptop 2's exact browser origin. The frontend does not alter server/network settings.
 
@@ -32,20 +32,22 @@ The implementation follows the official [password sign-in](https://supabase.com/
 
 ## Confirmed endpoints and integration limits
 
-The fetched backend snapshot `origin/feature/ai-backend` at `94ad558` exposes health, upload and jobs. The user's newer implementation status additionally confirms findings and previous live ingestion success; findings currently have mocked offline tests, not live AI extraction verification. That newer findings implementation/schema is not present in the fetched snapshot. The user's latest status takes precedence for the table below; this frontend run has not independently called the live services.
+The inspected backend milestone `0e5e5a8a217bfb75b1f5f7aff3cec6263454e765` is pushed to `origin/feature/ai-backend`. Existing shared API v0.1 types and contract define the read shapes below. User-reported live extraction and isolation results are separate from this frontend integration; this frontend run has not independently called the live services.
 
 | Endpoint | Current frontend behavior |
 | --- | --- |
 | `GET /api/v1/health` | Confirmed implemented. No automatic probe needed or used as proof of other capabilities. |
 | `POST /api/v1/policies/upload` | Wired after sign-in; existing multipart fields, current bearer token, exact 202 response validation. |
 | `GET /api/v1/jobs/{job_id}` | Wired to sequential polling; ID checks, timeout/backoff, `completed`/`needs_review`/`failed` terminal handling. |
-| `GET /api/v1/policies/{policy_id}/findings` | User confirms implementation/offline tests. Existing adapter is retained but report UI is gated until compatible policy details are available. No fabricated document metadata to make findings display. |
-| `GET /api/v1/policies` | Missing; never requested by the live entry. Session receipts are labeled uploads, not a fabricated wallet list. |
-| `GET /api/v1/policies/{policy_id}` | Missing; default gate prevents requests, including direct policy URLs. |
+| `GET /api/v1/policies/{policy_id}/findings` | Existing live adapter is wired to authenticated findings routes when policy reads are enabled. Findings are validated and rendered with condition, supported numeric rule values, applicability, review status and returned source/document attribution. |
+| `GET /api/v1/policies` | Authenticated live wallet adapter is wired when policy reads are enabled. It validates items and nullable cursor; no fixture fallback. |
+| `GET /api/v1/policies/{policy_id}` | Authenticated detail adapter is wired for detail and findings routes when policy reads are enabled. It validates the requested ID and document metadata; no fixture fallback. |
 | `GET /api/v1/documents/{document_id}/access` | Missing; no authenticated PDF viewer wired. |
 | `POST /api/v1/policies/{policy_id}/simulate` | Missing; never wired in live mode. Local calculator stays demo-only. |
 
-The real upload's `policy_id`, `document_id`, `job_id` and reported status are shown. Once policy reads are explicitly enabled and the job is `completed` or `needs_review`, the user can check availability: the detail adapter validates the actual response/ID, and policy type/category/status determine report eligibility. Only then does a findings link appear. The report route authenticates again and revalidates fetched data. A 404, incompatible shape, unsupported policy or absent response produces an explicit state, never fixture data. Job completion alone is not AI verification or coverage confirmation.
+In live mode with policy reads enabled, the wallet loads the user's policies. Uploads continue through the existing authenticated dialog and refresh the wallet after a terminal job state. Policy detail and findings routes fetch their resources through the same user's current session. `needs_review` reports remain visibly flagged; findings are not passed into the fictional claim simulator. A 404, incompatible shape, unsupported policy or absent response produces an explicit state, never fixture data. Job completion alone is not AI verification or coverage confirmation.
+
+The live finding card renders co-payment `rule.percent` and sub-limit `rule.amount_paise`/`rule.treatment` as reported values; it does not calculate a payout. The source quote is shown only when its document ID maps to the returned policy documents, with the 1-indexed PDF page. Focused rendering tests use synthetic backend-shaped data; no live browser/backend request was made here.
 
 ## Exact simulator schema differences
 

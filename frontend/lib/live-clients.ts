@@ -4,11 +4,13 @@ import { createApiUploadClient } from "./upload-client";
 import { UploadError, type UploadClient } from "./upload-contract";
 import { createApiPolicyClient, type PolicyClient } from "./policy-client";
 import { PolicyDataError } from "./policy-intelligence";
+import { createApiWalletClient, type WalletClient } from "./wallet-client";
 
 export function createLiveClients(config: LiveConfig, auth: AuthSessionController, ownerId: string) {
   const getAccessToken = () => auth.getAccessToken(ownerId);
   const upload = createApiUploadClient(config.backendOrigin, getAccessToken);
   const policy = createApiPolicyClient(config.backendOrigin, getAccessToken);
+  const wallet = createApiWalletClient(config.backendOrigin, getAccessToken);
   async function guarded<T>(signal: AbortSignal, run: (scope: AbortSignal) => Promise<T>): Promise<T> {
     const scope = auth.requestSignal(ownerId, signal);
     try {
@@ -36,6 +38,12 @@ export function createLiveClients(config: LiveConfig, auth: AuthSessionControlle
       return guarded(signal, scope => policy.getFindings(id, scope));
     },
   };
-  // No wallet list or simulation is wired: those backend endpoints are absent.
-  return { uploadClient, policyClient, getAccessToken };
+  const walletClient: WalletClient = {
+    listPolicies: signal => {
+      if (!config.policyReadsEnabled) return Promise.reject(new PolicyDataError("Live policy reads are not enabled."));
+      return guarded(signal ?? new AbortController().signal, scope => wallet.listPolicies(scope));
+    },
+  };
+  // The local claim simulator remains demo-only; the backend has no live simulation endpoint in use.
+  return { uploadClient, policyClient, walletClient, getAccessToken };
 }

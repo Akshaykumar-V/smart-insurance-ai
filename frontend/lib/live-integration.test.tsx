@@ -9,6 +9,7 @@ import { pollJob } from "./poll-job";
 import { SignInForm } from "../components/app-entry";
 import { LiveWorkspace } from "../components/live-workspace";
 import { mockPolicyDetails, mockFamilyReport } from "./mock-intelligence";
+import { mockPolicies } from "./mock-policies";
 import { createClient } from "@supabase/supabase-js";
 
 const env = { NEXT_PUBLIC_APP_MODE: "live", NEXT_PUBLIC_SUPABASE_URL: "https://project.supabase.co", NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_test_only", NEXT_PUBLIC_BACKEND_ORIGIN: "http://192.168.1.40:8000" };
@@ -203,28 +204,57 @@ test("sign-out cancels in-flight backend requests and prevents additional pollin
   } finally { globalThis.fetch = original; }
 });
 
-test("missing policy endpoints are gated with zero fetch calls and no synthetic responses", async () => {
+test("policy reads remain gated unless explicitly enabled", async () => {
   const f = fakeAuth(); await f.controller.start(); const clients = createLiveClients(config, f.controller, "owner-a");
   const original = globalThis.fetch; globalThis.fetch = async () => assert.fail("Missing endpoints must not be called");
   try {
     await assert.rejects(clients.policyClient.getPolicy(receipt.policy_id, signal()), /not enabled/);
     await assert.rejects(clients.policyClient.getFindings(receipt.policy_id, signal()), /not enabled/);
-    assert.equal("walletClient" in clients, false); assert.equal("simulationClient" in clients, false);
+    await assert.rejects(clients.walletClient.listPolicies(signal()), /not enabled/);
+    assert.equal("simulationClient" in clients, false);
   } finally { globalThis.fetch = original; }
 });
 
-test("future explicitly enabled policy reads validate real responses and never fall back to fixtures", async () => {
+test("enabled policy list, details and findings call contracted endpoints with current bearer token", async () => {
   const f = fakeAuth(); await f.controller.start();
   const clients = createLiveClients({ ...config, policyReadsEnabled: true }, f.controller, "owner-a");
-  const original = globalThis.fetch; const policy = mockPolicyDetails.find(item => item.id === mockFamilyReport.policy_id)!;
+  const original = globalThis.fetch;
+  const detail = mockPolicyDetails.find(item => item.id === mockFamilyReport.policy_id)!;
+  const card = mockPolicies.items.find(item => item.id === detail.id)!;
+  const calls: string[] = [];
   try {
-    globalThis.fetch = async () => Response.json({ id: policy.id });
-    await assert.rejects(clients.policyClient.getPolicy(policy.id, signal()));
+    globalThis.fetch = async (url, init) => {
+      calls.push(String(url));
+      assert.equal((init?.headers as Record<string, string>).Authorization, "Bearer fictional-token");
+      if (String(url).endsWith("/api/v1/policies")) return Response.json({ items: [card], next_cursor: null });
+      if (String(url).endsWith(`/api/v1/policies/${encodeURIComponent(detail.id)}/findings`)) return Response.json(mockFamilyReport);
+      return Response.json(detail);
+    };
+    assert.deepEqual(await clients.walletClient.listPolicies(signal()), { items: [card], next_cursor: null });
+    assert.deepEqual(await clients.policyClient.getPolicy(detail.id, signal()), detail);
+    assert.deepEqual(await clients.policyClient.getFindings(detail.id, signal()), mockFamilyReport);
+    assert.deepEqual(calls, [
+      `${config.backendOrigin}/api/v1/policies`,
+      `${config.backendOrigin}/api/v1/policies/${encodeURIComponent(detail.id)}`,
+      `${config.backendOrigin}/api/v1/policies/${encodeURIComponent(detail.id)}/findings`,
+    ]);
+    globalThis.fetch = async () => Response.json({ items: [{ id: "bad" }], next_cursor: null });
+    await assert.rejects(clients.walletClient.listPolicies(signal()), /invalid policy data/);
+    globalThis.fetch = async () => Response.json({ id: detail.id });
+    await assert.rejects(clients.policyClient.getPolicy(detail.id, signal()));
     globalThis.fetch = async () => new Response("missing", { status: 404 });
-    await assert.rejects(clients.policyClient.getPolicy(policy.id, signal()), /not be found/);
-    globalThis.fetch = async () => Response.json(policy); // Explicit fixture transport, never live evidence.
-    assert.deepEqual(await clients.policyClient.getPolicy(policy.id, signal()), policy);
+    await assert.rejects(clients.policyClient.getPolicy(detail.id, signal()), /not be found/);
   } finally { globalThis.fetch = original; }
+});
+
+test("live wallet and findings markup stay authenticated and never mount the demo simulator", async () => {
+  const f = fakeAuth(); await f.controller.start();
+  const liveConfig = { ...config, policyReadsEnabled: true };
+  const home = renderToStaticMarkup(<LiveWorkspace config={liveConfig} auth={f.controller} user={session().user} />);
+  const route = renderToStaticMarkup(<LiveWorkspace config={liveConfig} auth={f.controller} user={session().user} route={{ policyId: "opaque/id", view: "findings" }} />);
+  assert.match(home, /Insurance wallet/); assert.match(home, /LIVE mode/); assert.match(home, /Signed in as fictional@example.test/);
+  assert.match(route, /AI Policy Intelligence Report/); assert.match(route, /LIVE mode/);
+  for (const html of [home, route]) assert.doesNotMatch(html, /Family Health Plus|fixture-copay|Calculate illustrative impact|Simulate Claim Impact/);
 });
 
 test("sign-in and live route markup label mode and never display fictional policy reports", async () => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { AlertCircle, ArrowLeft, ArrowRight, BookOpen, ChevronRight, FileSearch, Info, RefreshCw, Sparkles } from "lucide-react";
 import { mockPolicyClient, type PolicyClient } from "@/lib/policy-client";
@@ -45,8 +45,10 @@ function IntelligenceReport({ policy, client, refreshPolicy }: { policy: PolicyD
   const report = state.data;
   return <>
     <section className="report-intro"><div className="report-intro-icon"><Sparkles size={23} /></div><div><span className="eyebrow">SIX AREAS. THE CONTEXT BEHIND EACH.</span><h2>Understand the conditions, not just the cover.</h2><p>Read the interpretation alongside the source, applicability and exceptions. A condition found in a policy is not automatically applicable to your situation.</p></div></section>
-    <div className="claim-entry"><div><strong>What could these conditions mean for a hypothetical bill?</strong><p>Explore co-payment and treatment-cap effects with explicit assumptions.</p></div><button className="button primary" aria-expanded={simulatorOpen} aria-controls="claim-simulator" onClick={() => setSimulatorOpen(value => !value)}>{simulatorOpen ? "Hide simulator" : "Simulate Claim Impact"}<ArrowRight size={16} /></button></div>
-    {simulatorOpen && <ClaimSimulator policy={policy} report={report} mode={client.mode} />}
+    {client.mode === "mock" ? <>
+      <div className="claim-entry"><div><strong>What could these conditions mean for a hypothetical bill?</strong><p>Explore co-payment and treatment-cap effects with explicit assumptions.</p></div><button className="button primary" aria-expanded={simulatorOpen} aria-controls="claim-simulator" onClick={() => setSimulatorOpen(value => !value)}>{simulatorOpen ? "Hide simulator" : "Simulate Claim Impact"}<ArrowRight size={16} /></button></div>
+      {simulatorOpen && <ClaimSimulator policy={policy} report={report} mode="mock" />}
+    </> : <div className="report-note"><Info size={19} /><p>Live findings are shown for review with their source evidence. They are not used for claim calculations.</p></div>}
     <div className="report-meta"><span>{report.findings.length} {report.findings.length === 1 ? "finding" : "findings"} returned</span><span>{client.mode === "mock" ? "Fixture version" : "Analysis version"}: {report.analysis_version}</span></div>
     <nav className="report-jumps" aria-label="Report categories">{conditionGroups.map(group => <a key={group.type} href={`#condition-${group.type}`}>{group.label}</a>)}</nav>
     {report.findings.length === 0 && <div className="report-note"><Info size={19} /><p>No findings were returned for this report. This is not evidence that conditions or exclusions are absent.</p></div>}

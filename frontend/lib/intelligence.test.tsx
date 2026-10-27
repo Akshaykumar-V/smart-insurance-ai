@@ -80,6 +80,43 @@ test("finding cards explain not-found and absent exceptions without guaranteeing
   assert.doesNotMatch(html, /Inspect source reference/);
 });
 
+test("live finding cards display backend rule values, applicability, source attribution and review status", () => {
+  const copay: Finding = {
+    ...finding,
+    id: "live-copay",
+    condition_type: "co_payment",
+    verification_status: "needs_review",
+    review_required: true,
+    rule: { percent: 20, basis: "admissible expenses" },
+    applicability: "Age 60 and above.",
+    source: { document_id: family.documents[0].id, page: 1, quote: "A co-payment of 20% applies to admissible expenses." },
+  };
+  const copayHtml = renderToStaticMarkup(<FindingCard finding={copay} documents={family.documents} mode="api" />);
+  assert.match(copayHtml, /Condition/);
+  assert.match(copayHtml, /Co-payment/);
+  assert.match(copayHtml, /20%/);
+  assert.match(copayHtml, /When this may apply/);
+  assert.match(copayHtml, /Age 60 and above/);
+  assert.match(copayHtml, /A co-payment of 20% applies to admissible expenses/);
+  assert.match(copayHtml, /PDF page 1/);
+  assert.match(copayHtml, /Needs review/);
+  assert.match(copayHtml, /flagged for review/);
+
+  const subLimit: Finding = {
+    ...copay,
+    id: "live-cataract",
+    condition_type: "sub_limit",
+    rule: { amount_paise: 4_000_000, treatment: "Cataract", basis: "per policy year" },
+    applicability: "Cataract treatment only.",
+    source: { document_id: family.documents[0].id, page: 2, quote: "Cataract treatment is limited to INR 40,000." },
+  };
+  const subLimitHtml = renderToStaticMarkup(<FindingCard finding={subLimit} documents={family.documents} mode="api" />);
+  assert.match(subLimitHtml, /Treatment sub-limit/);
+  assert.match(subLimitHtml, /Cataract: ₹40,000/);
+  assert.match(subLimitHtml, /PDF page 2/);
+  assert.match(subLimitHtml, /Needs review/);
+});
+
 test("conflicting and verified-but-review-required findings retain their cautions", () => {
   const conflict = mockFamilyReport.findings.find(item => item.verification_status === "conflicting")!;
   assert.match(renderToStaticMarkup(<FindingCard finding={conflict} documents={family.documents} mode="mock" />), /evidence conflicts/);

@@ -3,6 +3,34 @@
 import React, { useEffect, useRef, useState } from "react";
 import { AlertCircle, ArrowUpRight, FileText, Info, X } from "lucide-react";
 import { findingCautions, findingStatusLabels, sourceReference, verificationLabels, type Finding, type PolicyDocument, type SourceReference } from "@/lib/policy-intelligence";
+import { formatMoney } from "@/lib/policies";
+
+const conditionLabels: Record<Finding["condition_type"], string> = {
+  co_payment: "Co-payment",
+  deductible: "Deductible",
+  sub_limit: "Treatment sub-limit",
+  room_rent: "Room-rent restriction",
+  waiting_period: "Waiting period",
+  exclusion: "Exclusion",
+};
+
+function ruleValue(finding: Finding): string {
+  const rule = finding.rule;
+  if (!rule) return "No numeric value returned";
+  if (finding.condition_type === "co_payment") {
+    const percent = rule.percent;
+    return typeof percent === "number" && Number.isFinite(percent) && percent > 0 && percent <= 100
+      ? `${percent}%`
+      : "No supported percentage returned";
+  }
+  if (finding.condition_type === "sub_limit") {
+    const amount = rule.amount_paise;
+    if (typeof amount !== "number" || !Number.isSafeInteger(amount) || amount < 0) return "No supported amount returned";
+    const treatment = typeof rule.treatment === "string" ? rule.treatment : rule.treatment_label;
+    return `${typeof treatment === "string" && treatment.trim() ? `${treatment}: ` : ""}${formatMoney(amount)}`;
+  }
+  return "No numeric value returned";
+}
 
 function SourceDialog({ reference, demo, close }: { reference: Extract<SourceReference, { available: true }>; demo: boolean; close: () => void }) {
   const ref = useRef<HTMLDialogElement>(null);
@@ -29,7 +57,12 @@ export function FindingCard({ finding, documents, mode }: { finding: Finding; do
     <div className="finding-state">{findingStatusLabels[finding.status]}</div>
     <div className="finding-interpretation"><span className="content-label">{demo ? "Fictional AI interpretation" : "AI interpretation"}</span><p>{finding.explanation || "No plain-language explanation was returned."}</p></div>
     {cautions.length > 0 && <div className="finding-cautions"><AlertCircle size={17} /><ul>{cautions.map(message => <li key={message}>{message}</li>)}</ul></div>}
-    <dl className="finding-context"><div><dt>When this may apply</dt><dd>{finding.applicability || "Applicability has not been established from the available information."}</dd></div><div><dt>Exceptions & qualifications</dt><dd>{finding.exceptions.length ? <ul>{finding.exceptions.map((exception, index) => <li key={index}>{exception || "An exception entry was returned without details."}</li>)}</ul> : "No exceptions were returned. This does not establish that no exceptions exist."}</dd></div></dl>
+    <dl className="finding-context">
+      <div><dt>Condition</dt><dd>{conditionLabels[finding.condition_type]}</dd></div>
+      <div><dt>Extracted value</dt><dd>{ruleValue(finding)}</dd></div>
+      <div><dt>When this may apply</dt><dd>{finding.applicability || "Applicability has not been established from the available information."}</dd></div>
+      <div><dt>Exceptions & qualifications</dt><dd>{finding.exceptions.length ? <ul>{finding.exceptions.map((exception, index) => <li key={index}>{exception || "An exception entry was returned without details."}</li>)}</ul> : "No exceptions were returned. This does not establish that no exceptions exist."}</dd></div>
+    </dl>
     <div className={`finding-source ${source.available ? "" : "source-missing"}`}>
       <span className="content-label"><FileText size={14} />{demo ? "Fictional source reference" : "Original policy evidence"}</span>
       {source.available ? <>

@@ -198,7 +198,7 @@ export function UploadDialog({ open, close, policies, client: suppliedClient, on
         {!suppliedClient && <div className="demo-controls"><label htmlFor="demo-outcome">Demo scenario</label><select id="demo-outcome" value={outcome} onChange={event => setOutcome(event.target.value as DemoOutcome)}>{Object.entries(outcomeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><small>This selects a fictional outcome; it does not inspect your document.</small></div>}
       </fieldset>
       {validating && <p role="status">Checking the file header…</p>}
-      {error && <div className="upload-error" role="alert"><AlertCircle size={18} /><div>{error}{phase === "upload_error" && !demo && <p>Acceptance is unconfirmed. A lost response can leave an uploaded document on the server. Confirm with the backend operator before sending again; the live wallet list is not available yet.</p>}</div></div>}
+      {error && <div className="upload-error" role="alert"><AlertCircle size={18} /><div>{error}{phase === "upload_error" && !demo && <p>Acceptance is unconfirmed. A lost response can leave an uploaded document on the server. Confirm with the backend operator before sending again.</p>}</div></div>}
       <p className="upload-hint">A PDF header check cannot confirm readable text. Scanned, encrypted or damaged PDFs may require review or be rejected by the backend.</p>
       <button className="button primary upload-submit" type="submit" disabled={!file || validating}>
         <UploadCloud size={17} />{phase === "upload_error" ? (demo ? "Retry demo upload" : "Send PDF again") : demo ? "Run demo upload" : "Upload PDF"}

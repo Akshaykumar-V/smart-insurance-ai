@@ -9,6 +9,7 @@ import { reportAvailability } from "@/lib/policy-intelligence";
 import type { JobResponse, UploadResponse } from "@/lib/upload-contract";
 import { UploadDialog } from "./upload-dialog";
 import { WorkspaceShell } from "./workspace-shell";
+import { Wallet } from "./wallet";
 import { PolicyWorkspace } from "./policy-workspace";
 import type { PolicyRoute } from "./app-entry";
 
@@ -41,6 +42,7 @@ export function LiveWorkspace({ auth, user, config, route }: { auth: AuthSession
   }
   const account = <div className="live-account"><span>Signed in as {user.email || "authenticated user"}</span><button className="button secondary" onClick={() => void auth.signOut()}>Sign out</button></div>;
   if (route && config.policyReadsEnabled) return <>{account}<PolicyWorkspace key={route.policyId} {...route} client={clients.policyClient} /></>;
+  if (!route && config.policyReadsEnabled) return <Wallet client={clients.walletClient} uploadClient={clients.uploadClient} mode="api" accountSlot={account} />;
   return <><WorkspaceShell mode="api" section={route ? "Policy access" : "Live document upload"}>{account}
     <div className="page-heading"><div><span className="eyebrow">LIVE · AUTHENTICATED</span><h1>{route ? "Policy report is not connected" : "Upload a policy document"}</h1><p>Your PDF is sent to the configured backend after sign-in.</p></div>{!route && <button className="button primary" onClick={() => setOpen(true)}>Add policy</button>}</div>
     {route ? <div className="live-panel"><p>Policy ID: <code>{route.policyId}</code></p><p>Compatible policy details are not available yet. No report or fictional substitute is displayed.</p><Link className="button secondary" href="/">Back to live uploads</Link></div> : <>
