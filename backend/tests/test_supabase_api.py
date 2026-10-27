@@ -25,6 +25,12 @@ def test_authenticated_upload_job_and_second_user_through_http_adapter(pdf_bytes
         calls.append((request.method, request.url.path))
         token = request.headers["authorization"]
         assert request.headers["apikey"] == "public-test-key"
+        if request.url.path.startswith("/rest/v1/"):
+            profile = "Accept-Profile" if request.method == "GET" else "Content-Profile"
+            assert request.headers[profile] == "public"
+        else:
+            assert "Accept-Profile" not in request.headers
+            assert "Content-Profile" not in request.headers
         assert token in ("Bearer user-a", "Bearer user-b")
         if request.url.path == "/auth/v1/user":
             return httpx.Response(200, json={"id": owner_a if token.endswith("a") else owner_b})

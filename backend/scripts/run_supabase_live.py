@@ -49,9 +49,23 @@ def main() -> int:
         print("Use two distinct test users; no integration tests run.")
         return 1
     test_env["RUN_SUPABASE_LIVE"] = "1"
+    # Keep the established ingestion gate free of AI costs and model dependencies.
+    test_env["AI_EXTRACTION_ENABLED"] = "false"
     test_env["PYTEST_ADDOPTS"] = ""
     return subprocess.run(
-        [sys.executable, "-m", "pytest", "-q", "-m", "live", "--tb=short", "--no-showlocals"],
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-q",
+            "-m",
+            "live",
+            "--tb=short",
+            "--no-showlocals",
+            "--log-cli-level=WARNING",
+            "--log-disable=httpx",
+            "--log-disable=httpcore",
+        ],
         env=test_env,
         check=False,
     ).returncode

@@ -14,7 +14,9 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException
 
+from app.analysis import FindingsResponse, OpenAIExtractor, analyze_job
 from app.config import Settings
+from app.diagnostics import request_id_context
 from app.errors import ApiError
 from app.models import DocumentType, JobResponse, UploadResponse
 from app.pdf import parse_isolated
@@ -44,6 +46,7 @@ class RequestBoundary:
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
         request_id = str(uuid4())
+        context_token = request_id_context.set(request_id)
         scope.setdefault("state", {})["request_id"] = request_id
         started = False
 
@@ -99,6 +102,8 @@ class RequestBoundary:
                 await error_response(
                     500, "INTERNAL_ERROR", "The request could not be completed.", request_id
                 )(scope, receive, send_with_id)
+        finally:
+            request_id_context.reset(context_token)
 
 
 async def current_user(
@@ -110,7 +115,9 @@ async def current_user(
     return await request.app.state.gateway.authenticate(credentials.credentials)
 
 
-async def extract_job(gateway, principal, job_id: str, data: bytes, settings: Settings):
+async def extract_job(
+    gateway, principal, job_id: str, data: bytes, settings: Settings, extractor=None
+):
     try:
         await gateway.start_job(principal, job_id)
         parsed = await run_in_threadpool(parse_isolated, data, settings, extract=True)
@@ -121,7 +128,10 @@ async def extract_job(gateway, principal, job_id: str, data: bytes, settings: Se
                 "Some pages have no readable text or require review. OCR is not implemented. "
                 "AI analysis is not implemented in this milestone."
             )
-        await gateway.finish_job(principal, job_id, parsed, code=None, message=message)
+        if settings.ai_extraction_enabled:
+            await gateway.prepare_analysis(principal, job_id, parsed)
+        else:
+            await gateway.finish_job(principal, job_id, parsed, code=None, message=message)
     except Exception as exc:
         code = exc.code if isinstance(exc, ApiError) else "EXTRACTION_FAILED"
         message = exc.message if isinstance(exc, ApiError) else "PDF extraction could not complete."
@@ -131,14 +141,19 @@ async def extract_job(gateway, principal, job_id: str, data: bytes, settings: Se
             # Do not log exception bodies or tracebacks that could include private text/tokens.
             logger.error("job_failure_persistence_failed job_id=%s", job_id)
 
+        return
+    if settings.ai_extraction_enabled:
+        await analyze_job(gateway, extractor, principal, job_id)
 
-def create_app(settings: Settings | None = None, gateway=None) -> FastAPI:
+
+def create_app(settings: Settings | None = None, gateway=None, extractor=None) -> FastAPI:
     settings = settings or Settings()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         async with httpx.AsyncClient(timeout=20, follow_redirects=False) as client:
             app.state.gateway = gateway or SupabaseGateway(settings, client)
+            app.state.extractor = extractor or OpenAIExtractor(settings, client)
             yield
 
     app = FastAPI(
@@ -216,7 +231,13 @@ def create_app(settings: Settings | None = None, gateway=None) -> FastAPI:
                 page_count=inspected.page_count,
             )
             background_tasks.add_task(
-                extract_job, request.app.state.gateway, principal, ids.job_id, data, settings
+                extract_job,
+                request.app.state.gateway,
+                principal,
+                ids.job_id,
+                data,
+                settings,
+                request.app.state.extractor,
             )
             return ids
         finally:
@@ -227,6 +248,12 @@ def create_app(settings: Settings | None = None, gateway=None) -> FastAPI:
         request: Request, job_id: str, principal: Annotated[Principal, Depends(current_user)]
     ):
         return await request.app.state.gateway.get_job(principal, job_id)
+
+    @app.get("/api/v1/policies/{policy_id}/findings", response_model=FindingsResponse)
+    async def findings(
+        request: Request, policy_id: str, principal: Annotated[Principal, Depends(current_user)]
+    ):
+        return await request.app.state.gateway.get_findings(principal, policy_id)
 
     def contract_openapi():
         if app.openapi_schema is None:

@@ -2,7 +2,8 @@
 
 This is a hackathon proof-of-concept. Use only fictional documents and test identities.
 Local tests and a source review do **not** establish that deployed RLS or Storage work.
-No live project was configured or contacted by the integration suite during this task.
+Latest user-reported live result: **2 passed, 0 failed** after the RPC permission fix.
+The agent did not rerun the full live suite during commit preparation.
 
 ## 1. Create and configure the project manually
 
@@ -13,9 +14,14 @@ No live project was configured or contacted by the integration suite during this
 3. In SQL Editor, run these complete files in order, as the project administrator:
    - `supabase/migrations/202610250001_pdf_ingestion.sql`
    - `supabase/migrations/202610260001_ingestion_security.sql`
-   Each file has its own transaction. Neither is an idempotent script. If the first
-   migration is already applied, apply only the second; do not replay the first.
-   If either fails, stop and retain the sanitized error. Do not disable RLS to proceed.
+   - `supabase/migrations/202610260002_job_rpc_not_found.sql`
+   - `supabase/migrations/202610260003_restore_job_rpc_grants.sql`
+   Apply only migrations not already applied, in order. Each is transactional.
+   Do not replay the original table/constraint migrations. The third preserves
+   owner filters and returns PT404 for hidden/missing jobs; the fourth restores
+   authenticated-only RPC EXECUTE with effective permission checks.
+   If grants were fixed manually, reconcile migration history before an automated
+   deployment. If a migration fails, stop; do not disable RLS to proceed.
 4. Run `supabase/verify_pdf_ingestion.sql` in SQL Editor. It is read-only and rolls back.
    It must finish without an exception. Review the returned policies and constraints:
    - Four tables: `policies`, `documents`, `document_pages`, `analysis_jobs`, all with RLS.
@@ -122,6 +128,9 @@ The test must not claim that sharing an already signed URL preserves per-user is
 
 ## 4. Cleanup and troubleshooting
 
+For uploads returning 500, follow [safe upload diagnostics](UPLOAD_DIAGNOSTICS.md)
+before changing database policies or reapplying migrations.
+
 The live tests delete their generated objects through the Storage API first, then
 their policy rows (which cascade to documents, pages and jobs). They never wipe tables
 or delete users. If an assertion fails, cleanup is still attempted. Expired credentials,
@@ -178,3 +187,7 @@ References: [Supabase API keys](https://supabase.com/docs/guides/getting-started
 [function permissions](https://supabase.com/docs/guides/database/functions),
 [private buckets](https://supabase.com/docs/guides/storage/buckets/fundamentals),
 [authenticated downloads and signed URLs](https://supabase.com/docs/guides/storage/serving/downloads).
+
+
+For optional Milestone 3A AI extraction, see [AI_EXTRACTION.md](AI_EXTRACTION.md).
+Apply its separate migration only when enabling AI; the original live gate remains AI-free.

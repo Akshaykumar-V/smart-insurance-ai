@@ -1,4 +1,4 @@
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -12,3 +12,9 @@ class Settings(BaseSettings):
     max_extracted_characters: int = Field(default=2_000_000, gt=0, le=2_000_000)
     pdf_timeout_seconds: float = Field(default=20, gt=0, le=60)
     cors_origins: list[str] = ["http://localhost:3000"]
+
+    ai_extraction_enabled: bool = False
+    openai_api_key: SecretStr = SecretStr("")
+    openai_model: str = ""
+    ai_max_input_characters: int = Field(default=120_000, ge=1000, le=200_000)
+    ai_timeout_seconds: float = Field(default=90, gt=0, le=180)

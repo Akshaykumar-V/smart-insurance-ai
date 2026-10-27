@@ -54,7 +54,11 @@ def test_runner_passes_tokens_only_to_child_environment(monkeypatch, capsys, out
         assert env["RUN_SUPABASE_LIVE"] == "1"
         assert env["TEST_SUPABASE_TOKEN_A"] == "fixture-token-1"
         assert env["TEST_SUPABASE_TOKEN_B"] == "fixture-token-2"
+        assert env["AI_EXTRACTION_ENABLED"] == "false"
         assert "--no-showlocals" in args
+        assert "--log-cli-level=WARNING" in args
+        assert "--log-disable=httpx" in args
+        assert "--log-disable=httpcore" in args
         assert "fixture-token" not in str(args)
         return SimpleNamespace(returncode=0)
 
