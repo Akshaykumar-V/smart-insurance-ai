@@ -8,6 +8,7 @@ import { analysisLabels, conditionGroups, PolicyDataError, reportAvailability, t
 import { WorkspaceShell } from "./workspace-shell";
 import { PolicyDetailsContent } from "./policy-details";
 import { FindingCard } from "./finding-card";
+import { ClaimSimulator } from "./claim-simulator";
 
 type LoadState<T> = { status: "loading" } | { status: "error"; error: Error } | { status: "ready"; data: T };
 
@@ -22,6 +23,7 @@ function ErrorPanel({ error, retry }: { error: Error; retry: () => void }) {
 }
 
 function IntelligenceReport({ policy, client, refreshPolicy }: { policy: PolicyDetails; client: PolicyClient; refreshPolicy: () => void }) {
+  const [simulatorOpen, setSimulatorOpen] = useState(false);
   const [state, setState] = useState<LoadState<FindingsResponse>>({ status: "loading" });
   const [attempt, setAttempt] = useState(0);
   const availability = reportAvailability(policy);
@@ -43,6 +45,8 @@ function IntelligenceReport({ policy, client, refreshPolicy }: { policy: PolicyD
   const report = state.data;
   return <>
     <section className="report-intro"><div className="report-intro-icon"><Sparkles size={23} /></div><div><span className="eyebrow">SIX AREAS. THE CONTEXT BEHIND EACH.</span><h2>Understand the conditions, not just the cover.</h2><p>Read the interpretation alongside the source, applicability and exceptions. A condition found in a policy is not automatically applicable to your situation.</p></div></section>
+    <div className="claim-entry"><div><strong>What could these conditions mean for a hypothetical bill?</strong><p>Explore co-payment and treatment-cap effects with explicit assumptions.</p></div><button className="button primary" aria-expanded={simulatorOpen} aria-controls="claim-simulator" onClick={() => setSimulatorOpen(value => !value)}>{simulatorOpen ? "Hide simulator" : "Simulate Claim Impact"}<ArrowRight size={16} /></button></div>
+    {simulatorOpen && <ClaimSimulator policy={policy} report={report} mode={client.mode} />}
     <div className="report-meta"><span>{report.findings.length} {report.findings.length === 1 ? "finding" : "findings"} returned</span><span>{client.mode === "mock" ? "Fixture version" : "Analysis version"}: {report.analysis_version}</span></div>
     <nav className="report-jumps" aria-label="Report categories">{conditionGroups.map(group => <a key={group.type} href={`#condition-${group.type}`}>{group.label}</a>)}</nav>
     {report.findings.length === 0 && <div className="report-note"><Info size={19} /><p>No findings were returned for this report. This is not evidence that conditions or exclusions are absent.</p></div>}
@@ -54,7 +58,7 @@ function IntelligenceReport({ policy, client, refreshPolicy }: { policy: PolicyD
         {findings.length ? findings.map(finding => <FindingCard key={finding.id} finding={finding} documents={policy.documents} mode={client.mode} />) : <div className="no-finding"><FileSearch size={20} /><div><h3>No finding returned in this category</h3><p>The response does not establish whether this condition exists or applies. It does not guarantee coverage.</p></div></div>}
       </section>;
     })}</div>
-    <div className="report-note"><BookOpen size={19} /><p>Source checks are app checks, not insurer certification. No claim decision, financial impact calculation or rejection probability is provided here.</p></div>
+    <div className="report-note"><BookOpen size={19} /><p>Source checks are app checks, not insurer certification. The simulator models selected fictional rules only. No insurer claim decision or rejection probability is provided here.</p></div>
   </>;
 }
 

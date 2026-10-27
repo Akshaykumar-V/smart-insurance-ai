@@ -41,9 +41,11 @@ export const mockFamilyReport: FindingsResponse = {
     },
     {
       ...base, id: "fixture-copay", condition_type: "co_payment", title: "Member-linked co-payment needs context",
-      explanation: "A customer contribution may depend on the insured member's age and the applicable schedule. An unknown member age prevents a reliable applicability conclusion.",
-      applicability: "The relevant member and schedule terms must be confirmed. No contribution amount has been calculated.",
-      source: { document_id: "fixture-family-wording", page: 6, quote: "Fictional UI fixture: member-linked co-payment conditions are subject to the age and schedule terms specified for that member." },
+      explanation: "In this fictional example, a 20% contribution is modeled for a member aged 60 or above, using admissible expenses after the treatment sub-limit. Member and exception applicability still need a hypothetical scenario confirmation.",
+      verification_status: "verified",
+      rule: { percent: 20, basis: "admissible_expenses", minimum_age: 60, application_order: "after_sub_limits" },
+      applicability: "For an insured member aged at least 60, only on admissible expenses remaining after the applicable per-hospitalization treatment cap. Schedule and exception applicability remain to be checked.",
+      source: { document_id: "fixture-family-wording", page: 6, quote: "Fictional UI fixture: a 20% co-payment applies for members aged 60 or above to admissible expenses remaining after applicable per-hospitalization treatment sub-limits, subject to the governing schedule and exceptions." },
     },
     {
       ...base, id: "fixture-deductible", condition_type: "deductible", title: "Deductible references need reconciliation",
@@ -53,9 +55,12 @@ export const mockFamilyReport: FindingsResponse = {
       source: { document_id: "fixture-family-wording", page: 7, quote: "Fictional UI fixture: the deductible, if applicable, is specified in the governing policy schedule." },
     },
     {
-      ...base, id: "fixture-sublimit", condition_type: "sub_limit", title: "Treatment limit lacks sufficient evidence",
-      status: "uncertain", verification_status: "insufficient_evidence",
-      explanation: "The fictional response does not establish a treatment-specific limit or its expense basis. No numerical limit or financial impact can be presented.",
+      ...base, id: "fixture-sublimit", condition_type: "sub_limit", title: "Fictional cataract expense cap",
+      verification_status: "verified", review_required: false,
+      explanation: "This fictional cap limits eligible cataract expenses to INR 50,000 per hospitalization, before applying the modeled co-payment. It does not cap unrelated admissible expenses.",
+      rule: { amount_paise: 5000000, basis: "eligible_treatment_expenses", treatment_label: "Cataract", limit_scope: "per_hospitalization" },
+      applicability: "Only eligible cataract expense amounts within one hypothetical hospitalization. The amount must already be included in estimated admissible expenses; scope and exceptions need confirmation.",
+      source: { document_id: "fixture-family-wording", page: 8, quote: "Fictional UI fixture: eligible cataract treatment expenses are capped at INR 50,000 per hospitalization, before co-payment. This cap does not apply to other treatment categories and remains subject to the governing exceptions." },
     },
     {
       ...base, id: "fixture-room", condition_type: "room_rent", title: "Room eligibility refers to the schedule",
