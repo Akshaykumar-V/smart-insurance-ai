@@ -2,3 +2,4 @@
 .uv-cache/
 .env.*
 !.env.example
+local_benchmarks/
