@@ -1,3 +1,4 @@
+import { ReportReviewNotice } from "../components/report-safety";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import React from "react";
@@ -244,4 +245,35 @@ test("mock adapter returns isolated fixtures and explicit not-found errors witho
     const controller = new AbortController(); controller.abort();
     await assert.rejects(mockPolicyClient.getPolicy(family.id, controller.signal), { name: "AbortError" });
   } finally { globalThis.fetch = original; }
+});
+
+test("needs_review remains explicit even when the separate review flag is false", () => {
+  const pending: Finding = { ...finding, verification_status: "needs_review", review_required: false };
+  const html = renderToStaticMarkup(<FindingCard finding={pending} documents={family.documents} mode="api" />);
+  assert.match(html, /Needs review/);
+  assert.match(html, /wording and applicability have not been confirmed/);
+  assert.doesNotMatch(html, /Source checked by app/);
+});
+
+test("report review notice respects each independent review indicator", () => {
+  const clearPolicy = { ...family, needs_review: false, analysis_status: "ready" as const };
+  const clearFinding: Finding = { ...finding, review_required: false, status: "found", verification_status: "verified" };
+  const clearReport = { ...mockFamilyReport, findings: [clearFinding] };
+  assert.equal(renderToStaticMarkup(<ReportReviewNotice policy={clearPolicy} report={clearReport} />), "");
+  for (const patch of [{ needs_review: true }, { analysis_status: "needs_review" as const }]) {
+    assert.match(renderToStaticMarkup(<ReportReviewNotice policy={{ ...clearPolicy, ...patch }} report={clearReport} />), /Needs review/);
+  }
+  for (const patch of [{ review_required: true }, { status: "uncertain" as const }, ...(["needs_review", "conflicting", "insufficient_evidence"] as const).map(verification_status => ({ verification_status }))]) {
+    const html = renderToStaticMarkup(<ReportReviewNotice policy={clearPolicy} report={{ ...clearReport, findings: [{ ...clearFinding, ...patch }] }} />);
+    assert.match(html, /Needs review/);
+    assert.match(html, /not confirmation of coverage or an insurance payout/);
+  }
+});
+
+test("contract adapters reject missing DTO fields rather than inferring database aliases", () => {
+  const { id, ...detail } = family;
+  assert.throws(() => parsePolicyDetails({ ...detail, policy_id: id }, id));
+  const { source, rule, ...rest } = finding;
+  assert.throws(() => parseFindings({ ...mockFamilyReport, findings: [{ ...rest, source_json: source, rule_json: rule }] }, family.id));
+  assert.throws(() => parseFindings({ ...mockFamilyReport, analysis_version: undefined }, family.id));
 });

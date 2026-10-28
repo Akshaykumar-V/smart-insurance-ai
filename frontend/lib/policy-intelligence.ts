@@ -153,6 +153,7 @@ export function findingCautions(finding: Finding): string[] {
   if (finding.status === "not_applicable") messages.push("Reported non-applicability is limited to the supplied context; it is not a coverage guarantee.");
   if (finding.verification_status === "conflicting") messages.push("The evidence conflicts. The applicable wording and document version need review before drawing a conclusion.");
   if (finding.verification_status === "insufficient_evidence") messages.push("There is insufficient evidence to establish this condition safely.");
+  if (finding.verification_status === "needs_review") messages.push("This extracted finding needs review. Its wording and applicability have not been confirmed; do not treat it as a verified claim rule.");
   if (finding.review_required) messages.push("This finding is flagged for review, regardless of its source-check status.");
   return messages;
 }

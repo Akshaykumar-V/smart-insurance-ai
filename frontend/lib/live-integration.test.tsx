@@ -293,3 +293,52 @@ test("official Supabase SDK signs in and signs out through stubbed Auth HTTP wit
     assert.deepEqual(calls, ["https://auth.example.test/auth/v1/token?grant_type=password", "https://auth.example.test/auth/v1/logout?scope=local"]);
   } finally { auth.dispose(); client.auth.stopAutoRefresh(); }
 });
+
+test("prepared wallet reads use current tokens and preserve nullable contract fields with stubbed transport", async () => {
+  const f = fakeAuth(); await f.controller.start();
+  const clients = createLiveClients({ ...config, policyReadsEnabled: true }, f.controller, "owner-a");
+  const original = globalThis.fetch; const headers: string[] = [];
+  globalThis.fetch = async (url, init) => {
+    assert.equal(url, `${config.backendOrigin}/api/v1/policies`);
+    headers.push((init?.headers as Record<string, string>).Authorization);
+    return Response.json(mockPolicies);
+  };
+  try {
+    assert.deepEqual(await clients.walletClient.listPolicies(), mockPolicies);
+    f.emit(session("owner-a", "fictional-rotated-token"));
+    assert.deepEqual(await clients.walletClient.listPolicies(), mockPolicies);
+    assert.deepEqual(headers, ["Bearer fictional-token", "Bearer fictional-rotated-token"]);
+  } finally { globalThis.fetch = original; f.controller.dispose(); }
+});
+
+test("prepared policy reads expire on 401 and preserve the session on 403", async () => {
+  const original = globalThis.fetch;
+  try {
+    for (const status of [401, 403]) {
+      for (const kind of ["wallet", "details", "findings"]) {
+        const f = fakeAuth(); await f.controller.start();
+        const clients = createLiveClients({ ...config, policyReadsEnabled: true }, f.controller, "owner-a");
+        globalThis.fetch = async () => new Response(null, { status });
+        const request = kind === "wallet" ? clients.walletClient.listPolicies() : kind === "details" ? clients.policyClient.getPolicy("fixture", signal()) : clients.policyClient.getFindings("fixture", signal());
+        await assert.rejects(request);
+        assert.equal(f.controller.getSnapshot().status, status === 401 ? "signed_out" : "signed_in");
+        f.controller.dispose();
+      }
+    }
+  } finally { globalThis.fetch = original; }
+});
+
+test("sign-out cancels the prepared wallet reader and prevents subsequent reads", async () => {
+  const f = fakeAuth(); await f.controller.start();
+  const clients = createLiveClients({ ...config, policyReadsEnabled: true }, f.controller, "owner-a");
+  const original = globalThis.fetch; let started!: () => void;
+  const start = new Promise<void>(resolve => { started = resolve; });
+  globalThis.fetch = async (_url, init) => new Promise((_resolve, reject) => {
+    init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true }); started();
+  });
+  try {
+    const rejected = assert.rejects(clients.walletClient.listPolicies(), { name: "AbortError" });
+    await start; await f.controller.signOut(); await rejected;
+    await assert.rejects(clients.walletClient.listPolicies(), AuthRequiredError);
+  } finally { globalThis.fetch = original; f.controller.dispose(); }
+});

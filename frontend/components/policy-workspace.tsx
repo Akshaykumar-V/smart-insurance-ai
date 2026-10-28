@@ -8,6 +8,7 @@ import { analysisLabels, conditionGroups, findingsAvailability, PolicyDataError,
 import { WorkspaceShell } from "./workspace-shell";
 import { PolicyDetailsContent } from "./policy-details";
 import { FindingCard } from "./finding-card";
+import { ReportReviewNotice } from "./report-safety";
 import { ClaimSimulator } from "./claim-simulator";
 
 type LoadState<T> = { status: "loading" } | { status: "error"; error: Error } | { status: "ready"; data: T };
@@ -53,7 +54,7 @@ function IntelligenceReport({ policy, client, refreshPolicy }: { policy: PolicyD
     <div className="report-meta"><span>{report.findings.length} {report.findings.length === 1 ? "finding" : "findings"} returned</span><span>{client.mode === "mock" ? "Fixture version" : "Analysis version"}: {report.analysis_version}</span></div>
     <nav className="report-jumps" aria-label="Report categories">{conditionGroups.map(group => <a key={group.type} href={`#condition-${group.type}`}>{group.label}</a>)}</nav>
     {report.findings.length === 0 && <div className="report-note"><Info size={19} /><p>No findings were returned for this report. This is not evidence that conditions or exclusions are absent.</p></div>}
-    {policy.needs_review && <div className="report-note attention"><AlertCircle size={19} /><p>This policy is flagged for review. Personal details, applicability or supporting documents may still need confirmation.</p></div>}
+    <ReportReviewNotice policy={policy} report={report} />
     <div className="findings-sections">{conditionGroups.map(group => {
       const findings = report.findings.filter(finding => finding.condition_type === group.type);
       return <section id={`condition-${group.type}`} key={group.type} className="condition-section" aria-labelledby={`heading-${group.type}`}>

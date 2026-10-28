@@ -1,3 +1,4 @@
+import { PolicyDataError } from "./policy-intelligence";
 ﻿import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parsePolicyList, formatMoney } from "./policies";
@@ -37,3 +38,73 @@ test("real client stops unauthenticated requests", async () => {
  await assert.rejects(createApiWalletClient("https://example.test", async () => "").listPolicies(), /Sign in/);
 });
 
+
+test("wallet reader rejects HTTP failures, malformed JSON and unconfirmed response shapes", async () => {
+ const original = globalThis.fetch;
+ const client = createApiWalletClient("https://example.test", async () => "fictional-token");
+ try {
+  for (const status of [401, 403, 404, 429, 500]) {
+   globalThis.fetch = async () => new Response("private server details", { status });
+   await assert.rejects(client.listPolicies(), error => {
+    assert.ok(error instanceof PolicyDataError);
+    assert.equal(error.status, status);
+    assert.doesNotMatch(error.message, /private server details/);
+    return true;
+   });
+  }
+  globalThis.fetch = async () => new Response(null, { status: 204 });
+  await assert.rejects(client.listPolicies(), /unexpected response status/);
+  globalThis.fetch = async () => new Response("not json");
+  await assert.rejects(client.listPolicies(), /unreadable/);
+  for (const body of [mockPolicies.items, { policies: mockPolicies.items }, { items: [] }]) {
+   globalThis.fetch = async () => Response.json(body);
+   await assert.rejects(client.listPolicies());
+  }
+  globalThis.fetch = async () => Response.json({ items: [], next_cursor: null });
+  assert.deepEqual(await client.listPolicies(), { items: [], next_cursor: null });
+ } finally { globalThis.fetch = original; }
+});
+
+test("wallet cancellation while obtaining a token prevents the network request", async () => {
+ const original = globalThis.fetch;
+ const controller = new AbortController();
+ globalThis.fetch = async () => assert.fail("Cancelled wallet must not fetch");
+ try {
+  const client = createApiWalletClient("https://example.test", async () => { controller.abort(); return "fictional-token"; });
+  await assert.rejects(client.listPolicies(controller.signal), { name: "AbortError" });
+ } finally { globalThis.fetch = original; }
+});
+
+
+test("wallet timeout aborts the request and returns a safe error", async (t) => {
+ const original = globalThis.fetch;
+ t.mock.timers.enable({ apis: ["setTimeout"] });
+ let started!: () => void;
+ const ready = new Promise<void>(resolve => { started = resolve; });
+ let requestSignal: AbortSignal | null | undefined;
+ globalThis.fetch = async (_url, init) => new Promise<Response>((_resolve, reject) => {
+  requestSignal = init?.signal;
+  requestSignal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+  started();
+ });
+ try {
+  const client = createApiWalletClient("https://example.test", async () => "fictional-token");
+  const rejected = assert.rejects(client.listPolicies(), /timed out or the connection was interrupted/);
+  await ready;
+  t.mock.timers.tick(30_000);
+  await rejected;
+  assert.equal(requestSignal?.aborted, true);
+ } finally { globalThis.fetch = original; t.mock.timers.reset(); }
+});
+
+test("wallet cancellation during JSON parsing rejects the late response", async () => {
+ const original = globalThis.fetch;
+ const controller = new AbortController();
+ const response = Response.json(mockPolicies);
+ response.json = async () => { controller.abort(); return mockPolicies; };
+ globalThis.fetch = async () => response;
+ try {
+  const client = createApiWalletClient("https://example.test", async () => "fictional-token");
+  await assert.rejects(client.listPolicies(controller.signal), { name: "AbortError" });
+ } finally { globalThis.fetch = original; }
+});
