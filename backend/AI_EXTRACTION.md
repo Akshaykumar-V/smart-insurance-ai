@@ -31,10 +31,32 @@ documents without reconciling schedule/endorsement conflicts.
 
 Exact, case-sensitive contiguous quote matching against the referenced physical page
 is mandatory. No fuzzy matching or invented citations. Matched numeric tokens and
-basis/treatment text are checked before a rule is retained. Incorrect quotes/pages
-produce uncertain/insufficient_evidence with source=null and rule=null; invented
-quotes are not returned as evidence. Matching quotes with ambiguous/unsupported rules
-retain the source, but rule=null and status=uncertain.
+basis/treatment text are checked before a rule is retained. Candidates with an incorrect
+page, a nonmatching quote or a quote shorter than 12 characters after trimming are
+omitted from new findings. No quotation normalization or fuzzy matching is performed.
+Every input candidate failing this check is counted, including repeated invalid
+citations; exact duplicates of accepted (type, page, quote) tuples are still deduplicated.
+Distinct source-backed clauses are preserved. Matching quotes with ambiguous or
+unsupported rules retain the source, but rule=null and status=uncertain.
+
+Conservative lexical guards also withhold numeric rules for definition wording in
+the quote and schedule references in the quote or model interpretation. These guards
+do not establish applicability or exhaustively recognize every definition/dependency.
+They may withhold a rule for an incidental schedule mention. Model interpretation
+can only cause a downgrade; it cannot validate a quotation or numeric value. Evidence
+remains an unchanged slice of the cited physical page, with needs_review and
+review_required=true.
+
+The existing job message includes `Rejected candidates: N (source verification failed).`
+It starts with `Analysis incomplete.` if any candidate was rejected, no findings were
+retained, or any retained finding has no numeric rule. It always states that the
+analysis does not establish the absence of exclusions or restrictions. A successful
+provider response with rejected candidates still ends needs_review/verifying with
+error=null. This uses the existing API v0.1 fields and requires no migration. Rejected
+quotations and interpretations are not included in the warning or persisted findings.
+The warning is available through the job endpoint; no frontend report warning field
+has been added. Existing stored findings and job messages are not rewritten by this
+change, and their legacy response shape remains readable.
 
 Every finding is review_required=true. Even a source-matched numeric rule remains
 needs_review: quote presence does not verify applicability, completeness, model health

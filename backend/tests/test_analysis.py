@@ -87,32 +87,37 @@ def test_two_rule_types_preserve_original_evidence_and_paise():
         pages(),
         "doc",
     )
-    assert result[0].rule == {"percent": 20, "basis": "admissible expenses"}
-    assert result[1].rule == {
+    assert result.rejected_count == 0
+    assert result.findings[0].rule == {"percent": 20, "basis": "admissible expenses"}
+    assert result.findings[1].rule == {
         "amount_paise": 4000000,
         "treatment": "Cataract",
         "basis": "per eye per policy year",
     }
-    assert result[1].source.page == 2
-    assert result[1].source.quote == LIMIT
-    assert all(f.review_required and f.verification_status == "needs_review" for f in result)
+    assert result.findings[1].source.page == 2
+    assert result.findings[1].source.quote == LIMIT
+    assert all(
+        f.review_required and f.verification_status == "needs_review" for f in result.findings
+    )
 
 
 @pytest.mark.parametrize(
     "changes",
     [
         {"page": 99},
+        {"page": 2},  # Real page, but the quote belongs to page 1.
         {"quote": "Invented private quote"},
         {"quote": COPAY.lower()},
+        {"quote": "A 20% copay applies to admissible expenses for people aged 60 or older."},
+        {"quote": "co-payment"},  # Exact substring, but too short.
+        {"quote": COPAY.replace("20%", "30%")},
+        {"quote": COPAY.replace(" of ", "\nof ", 1)},
     ],
 )
-def test_hallucinated_citation_has_no_source_or_actionable_rule(changes):
-    finding = verify_findings(extraction(candidate(**changes)), pages(), "doc")[0]
-    assert finding.source is None
-    assert finding.rule is None
-    assert finding.status == "uncertain"
-    assert finding.verification_status == "insufficient_evidence"
-    assert "Invented private quote" not in finding.model_dump_json()
+def test_invalid_citation_is_counted_and_omitted(changes):
+    result = verify_findings(extraction(candidate(**changes)), pages(), "doc")
+    assert result.findings == []
+    assert result.rejected_count == 1
 
 
 @pytest.mark.parametrize(
@@ -126,7 +131,7 @@ def test_hallucinated_citation_has_no_source_or_actionable_rule(changes):
     ],
 )
 def test_uncertain_numeric_or_applicability_conditions_have_no_rule(changes):
-    finding = verify_findings(extraction(candidate(**changes)), pages(), "doc")[0]
+    finding = verify_findings(extraction(candidate(**changes)), pages(), "doc").findings[0]
     assert finding.rule is None
     assert finding.source.quote == COPAY
     assert finding.status == "uncertain"
@@ -135,12 +140,14 @@ def test_uncertain_numeric_or_applicability_conditions_have_no_rule(changes):
 def test_bad_quality_and_out_of_scope_and_empty_results():
     bad_pages = pages()
     bad_pages[0].extraction_quality = "needs_review"
-    assert verify_findings(extraction(candidate()), bad_pages, "doc")[0].rule is None
+    assert verify_findings(extraction(candidate()), bad_pages, "doc").findings[0].rule is None
     out = extraction(candidate())
     out.is_health_policy = False
-    assert verify_findings(out, pages(), "doc") == []
-    assert verify_findings(extraction(), pages(), "doc") == []
-    assert len(verify_findings(extraction(candidate(), candidate()), pages(), "doc")) == 1
+    assert verify_findings(out, pages(), "doc").findings == []
+    assert verify_findings(extraction(), pages(), "doc").findings == []
+    result = verify_findings(extraction(candidate(), candidate()), pages(), "doc")
+    assert len(result.findings) == 1
+    assert result.rejected_count == 0
 
 
 @pytest.mark.parametrize(
@@ -161,7 +168,101 @@ def test_sublimit_units_and_multiple_values_require_review(quote, amount):
         treatment="Cataract",
         basis="per eye",
     )
-    assert verify_findings(extraction(c), [page], "doc")[0].rule is None
+    assert verify_findings(extraction(c), [page], "doc").findings[0].rule is None
+
+
+def test_exact_unicode_and_newlines_are_preserved_with_valid_rule():
+    quote = "ಮೊತ್ತ: Cataract treatment\nis limited to ₹40,000 per eye per policy year."
+    page = ExtractedPage(page_number=7, text=quote, extraction_quality="text_present")
+    c = candidate(
+        condition_type="sub_limit",
+        page=7,
+        quote=quote,
+        percent=None,
+        amount_rupees=40000,
+        treatment="Cataract",
+        basis="per eye per policy year",
+    )
+    result = verify_findings(extraction(c), [page], "doc")
+    assert result.rejected_count == 0
+    finding = result.findings[0]
+    assert finding.source.model_dump() == {"document_id": "doc", "page": 7, "quote": quote}
+    assert finding.rule["amount_paise"] == 4000000
+    assert finding.verification_status == "needs_review"
+    assert finding.review_required
+
+
+@pytest.mark.parametrize(
+    "quote,kind",
+    [
+        ("Co-payment means 20% of admissible expenses.", "co_payment"),
+        ("Co-payment shall mean 20% of admissible expenses.", "co_payment"),
+        (
+            '"Co-payment" is a cost-sharing term, for example 20% of admissible expenses.',
+            "co_payment",
+        ),
+        ("Definition: A co-payment of 20% of admissible expenses.", "co_payment"),
+        ("Cataract sub-limit is defined as INR 40,000 per eye.", "sub_limit"),
+        ("Cataract sub-limit refers to INR 40,000 per eye.", "sub_limit"),
+        (
+            "A co-payment of 20% of admissible expenses applies "
+            "as specified in the Policy Schedule.",
+            "co_payment",
+        ),
+        (
+            "Cataract is limited to INR 40,000 per eye, subject to the Schedule of Benefits.",
+            "sub_limit",
+        ),
+    ],
+)
+def test_definitions_and_schedule_terms_retain_evidence_without_numeric_rules(quote, kind):
+    page = ExtractedPage(page_number=1, text=quote, extraction_quality="text_present")
+    c = candidate(
+        condition_type=kind,
+        quote=quote,
+        ambiguous=False,
+        amount_rupees=40000 if kind == "sub_limit" else None,
+        treatment="Cataract" if kind == "sub_limit" else None,
+        basis="per eye" if kind == "sub_limit" else "admissible expenses",
+        explanation="An operative numeric rule applies.",
+    )
+    result = verify_findings(extraction(c), [page], "doc")
+    assert result.rejected_count == 0
+    finding = result.findings[0]
+    assert finding.source.quote == quote
+    assert finding.source.page == 1
+    assert finding.rule is None
+    assert finding.status == "uncertain"
+    assert finding.verification_status == "needs_review"
+    assert finding.review_required
+    assert "no numeric rule was generated" in finding.explanation
+    assert "An operative numeric rule applies" not in finding.explanation
+
+
+@pytest.mark.parametrize("field", ["applicability", "explanation", "exceptions"])
+def test_schedule_dependency_in_interpretation_can_only_withhold_a_rule(field):
+    dependency = "The applicable percentage depends on the separate policy schedule."
+    value = [dependency] if field == "exceptions" else dependency
+    result = verify_findings(extraction(candidate(**{field: value})), pages(), "doc")
+    assert result.findings[0].rule is None
+    assert result.findings[0].source.quote == COPAY
+    assert result.rejected_count == 0
+
+
+def test_rejection_counts_input_candidates_and_preserves_distinct_valid_clauses():
+    second = COPAY.replace("age 60 and above", "age 70 and above")
+    page = ExtractedPage(
+        page_number=1, text=COPAY + "\n" + second, extraction_quality="text_present"
+    )
+    invalid = candidate(quote="PRIVATE_REJECTED_SENTINEL")
+    result = verify_findings(
+        extraction(candidate(), candidate(), candidate(quote=second), invalid, invalid),
+        [page],
+        "doc",
+    )
+    assert result.rejected_count == 2
+    assert [f.source.quote for f in result.findings] == [COPAY, second]
+    assert all(f.rule["percent"] == 20 for f in result.findings)
 
 
 def test_openai_structured_request_and_response(caplog):
@@ -294,8 +395,8 @@ class AnalysisMemoryGateway(MemoryGateway):
         }
 
 
-@pytest.mark.parametrize("provider_fails", [False, True])
-def test_upload_to_findings_and_cross_user_api(provider_fails, caplog):
+@pytest.mark.parametrize("provider_fails,rejected_count", [(False, 0), (False, 6), (True, 0)])
+def test_upload_to_findings_and_cross_user_api(provider_fails, rejected_count, caplog):
     gateway = AnalysisMemoryGateway()
 
     class MockExtractor:
@@ -303,6 +404,8 @@ def test_upload_to_findings_and_cross_user_api(provider_fails, caplog):
             assert COPAY in stored_pages[0].text
             if provider_fails:
                 raise RuntimeError("PRIVATE_SENTINEL")
+            if rejected_count:
+                return extraction(*[candidate(quote="PRIVATE_SENTINEL")] * rejected_count)
             return extraction(candidate())
 
     settings = Settings(_env_file=None, ai_extraction_enabled=True)
@@ -320,16 +423,64 @@ def test_upload_to_findings_and_cross_user_api(provider_fails, caplog):
         assert job["status"] == "needs_review"
         assert job["stage"] == "verifying"
         assert bool(job["error"]) == provider_fails
+        if rejected_count:
+            assert "Analysis incomplete." in job["message"]
+            assert f"Rejected candidates: {rejected_count}" in job["message"]
+            assert "does not establish the absence of exclusions or restrictions" in job["message"]
+        assert (
+            client.get(
+                "/api/v1/jobs/" + ids["job_id"], headers={"Authorization": "Bearer owner-b"}
+            ).status_code
+            == 404
+        )
         path = "/api/v1/policies/" + ids["policy_id"] + "/findings"
         own = client.get(path, headers={"Authorization": "Bearer owner-a"})
         assert own.status_code == 200
-        assert len(own.json()["findings"]) == (0 if provider_fails else 1)
+        assert len(own.json()["findings"]) == (0 if provider_fails or rejected_count else 1)
         assert client.get(path).status_code == 401
         denied = client.get(path, headers={"Authorization": "Bearer owner-b"})
         assert denied.status_code == 404
         assert COPAY not in denied.text
         assert "PRIVATE_SENTINEL" not in own.text
+        assert "PRIVATE_SENTINEL" not in json.dumps(job)
     assert "PRIVATE_SENTINEL" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "quote",
+    [
+        "Co-payment means 20% of admissible expenses.",
+        "A co-payment of 20% of admissible expenses applies subject to the policy schedule.",
+    ],
+)
+def test_review_only_evidence_has_incomplete_job_warning(quote):
+    gateway = AnalysisMemoryGateway()
+
+    class MockExtractor:
+        async def extract(self, stored_pages):
+            return extraction(candidate(quote=quote))
+
+    with TestClient(
+        create_app(Settings(_env_file=None, ai_extraction_enabled=True), gateway, MockExtractor())
+    ) as client:
+        ids = client.post(
+            "/api/v1/policies/upload",
+            headers={"Authorization": "Bearer owner-a"},
+            files={"file": ("fictional.pdf", make_pdf((quote,)), "application/pdf")},
+        ).json()
+        job = client.get(
+            "/api/v1/jobs/" + ids["job_id"], headers={"Authorization": "Bearer owner-a"}
+        ).json()
+        assert job["error"] is None
+        assert job["message"].startswith("Analysis incomplete.")
+        assert "Rejected candidates: 0" in job["message"]
+        result = client.get(
+            "/api/v1/policies/" + ids["policy_id"] + "/findings",
+            headers={"Authorization": "Bearer owner-a"},
+        ).json()["findings"]
+        assert len(result) == 1
+        assert result[0]["rule"] is None
+        assert result[0]["source"]["quote"] == quote
 
 
 def test_gateway_findings_requires_owner_and_scopes_query():
@@ -443,7 +594,8 @@ def test_schema_requires_all_properties_and_rejects_extras():
         assert obj["additionalProperties"] is False
 
 
-def test_upload_through_real_http_adapters_to_persisted_findings():
+@pytest.mark.parametrize("valid_count,rejected_count", [(1, 0), (2, 0), (1, 2), (0, 6), (0, 0)])
+def test_upload_through_real_http_adapters_to_persisted_findings(valid_count, rejected_count):
     owner = str(uuid4())
     state = {"calls": [], "findings": []}
 
@@ -453,7 +605,23 @@ def test_upload_through_real_http_adapters_to_persisted_findings():
         if request.url.host == "api.openai.com":
             body = json.loads(request.content)
             assert COPAY in json.loads(body["input"])[0]["text"]
-            return httpx.Response(200, json=provider_result(extraction(candidate()).model_dump()))
+            candidates = [candidate()] if valid_count else []
+            if valid_count == 2:
+                candidates.append(
+                    candidate(
+                        condition_type="sub_limit",
+                        page=2,
+                        quote=LIMIT,
+                        percent=None,
+                        amount_rupees=40000,
+                        treatment="Cataract",
+                        basis="per eye per policy year",
+                    )
+                )
+            candidates += [
+                candidate(quote="PRIVATE_REJECTED_CANDIDATE", explanation="PRIVATE_INTERPRETATION")
+            ] * rejected_count
+            return httpx.Response(200, json=provider_result(extraction(*candidates).model_dump()))
         assert request.headers["authorization"] == "Bearer fixture-user"
         if path == "/auth/v1/user":
             return httpx.Response(200, json={"id": owner})
@@ -479,6 +647,9 @@ def test_upload_through_real_http_adapters_to_persisted_findings():
             elif path.endswith("/finish_pdf_analysis"):
                 assert body["p_error_code"] is None
                 state["findings"] = body["p_findings"]
+                state["message"] = body["p_message"]
+                assert "PRIVATE_REJECTED_CANDIDATE" not in request.content.decode()
+                assert "PRIVATE_INTERPRETATION" not in request.content.decode()
             else:
                 assert path.endswith("/start_pdf_extraction")
             return httpx.Response(204)
@@ -488,6 +659,21 @@ def test_upload_through_real_http_adapters_to_persisted_findings():
             return httpx.Response(200, json=state["pages"])
         if path.endswith("/policies"):
             return httpx.Response(200, json=[{"id": state["policy"]}])
+        if path.endswith("/analysis_jobs"):
+            assert request.url.params["id"] == "eq." + state["job"]
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "id": state["job"],
+                        "policy_id": state["policy"],
+                        "status": "needs_review",
+                        "stage": "verifying",
+                        "message": state["message"],
+                        "error_code": None,
+                    }
+                ],
+            )
         assert path.endswith("/findings")
         rows = [{"payload": f} for f in state["findings"]]
         return httpx.Response(200, json=rows if request.url.params["offset"] == "0" else [])
@@ -510,7 +696,7 @@ def test_upload_through_real_http_adapters_to_persisted_findings():
             uploaded = client.post(
                 "/api/v1/policies/upload",
                 headers={"Authorization": "Bearer fixture-user"},
-                files={"file": ("fictional.pdf", make_pdf((COPAY,)), "application/pdf")},
+                files={"file": ("fictional.pdf", make_pdf((COPAY, LIMIT)), "application/pdf")},
             )
             assert uploaded.status_code == 202
             response = client.get(
@@ -518,10 +704,32 @@ def test_upload_through_real_http_adapters_to_persisted_findings():
                 headers={"Authorization": "Bearer fixture-user"},
             )
             assert response.status_code == 200
-            finding = response.json()["findings"][0]
-            assert finding["rule"]["percent"] == 20
-            assert finding["source"]["document_id"] == uploaded.json()["document_id"]
-            assert finding["source"]["quote"] == COPAY
+            assert len(response.json()["findings"]) == valid_count
+            if valid_count:
+                finding = response.json()["findings"][0]
+                assert finding["rule"]["percent"] == 20
+                assert finding["source"]["document_id"] == uploaded.json()["document_id"]
+                assert finding["source"]["quote"] == COPAY
+                assert finding["source"]["page"] == 1
+            if valid_count == 2:
+                finding = response.json()["findings"][1]
+                assert finding["rule"]["amount_paise"] == 4000000
+                assert finding["source"]["quote"] == LIMIT
+                assert finding["source"]["page"] == 2
+            job_response = client.get(
+                "/api/v1/jobs/" + uploaded.json()["job_id"],
+                headers={"Authorization": "Bearer fixture-user"},
+            )
+            assert job_response.status_code == 200
+            job = job_response.json()
+            assert job["status"] == "needs_review"
+            assert job["stage"] == "verifying"
+            assert job["error"] is None
+            assert f"Rejected candidates: {rejected_count}" in job["message"]
+            assert "does not establish the absence of exclusions or restrictions" in job["message"]
+            if rejected_count or not valid_count:
+                assert "Analysis incomplete." in job["message"]
+            assert "PRIVATE_REJECTED_CANDIDATE" not in job_response.text
             assert "/rest/v1/rpc/finish_pdf_extraction" not in state["calls"]
     finally:
         asyncio.run(upstream.aclose())

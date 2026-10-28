@@ -2,6 +2,7 @@
 
 import json
 import re
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import Literal
 from uuid import uuid4
@@ -61,6 +62,12 @@ class FindingsResponse(BaseModel):
     findings: list[Finding]
 
 
+@dataclass
+class VerificationResult:
+    findings: list[Finding]
+    rejected_count: int = 0
+
+
 PROMPT = """Extract only percentage co-payment clauses and treatment-specific INR
 sub-limits from Indian indemnity health insurance wording. Life/motor/other products
 are out of scope. Return is_health_policy=false unless this is health insurance.
@@ -73,6 +80,8 @@ Use null for unavailable numeric values/basis/treatment, and ambiguous=true for
 missing schedule, conflicting limits, unclear units, linked exceptions or uncertain
 applicability. Treatment must appear verbatim in the quote. For sub-limits use only
 explicit INR amounts; do not convert percentages, lakh/crore or amounts in words.
+Definitions alone do not establish an applicable financial condition. Mark definitions
+and conditions dependent on a separate policy schedule ambiguous=true.
 Extract amount_rupees as whole rupees. For co-pay extract percent, not a decimal rate.
 No relevant clauses means an empty findings array, never a coverage guarantee.
 Explanations must be concise interpretations, not claim decisions. Maximum 32 findings.
@@ -164,23 +173,54 @@ class OpenAIExtractor:
             ) from None
 
 
-def verify_findings(extraction: Extraction, pages: list[ExtractedPage], document_id: str):
+def review_only_reason(candidate: Candidate) -> str | None:
+    """Conservative lexical guards, not proof of applicability or a semantic classifier."""
+    if re.search(
+        r"\b(?:means|shall\s+mean|defined\s+as|refers?\s+to|definitions?)\b"
+        r"|\b(?:co[\s\-\u2010-\u2014]*pay(?:ment)?|sub[\s\-\u2010-\u2014]*limit)"
+        r"[\s\"'\u2019\u201d]*(?:is|are)\s+(?:a|an|the)\b",
+        candidate.quote,
+        re.I,
+    ):
+        return "Definition wording requires review; no numeric rule was generated."
+    # Model interpretation can only withhold a rule, never establish evidence.
+    context = "\n".join(
+        [candidate.quote, candidate.applicability, candidate.explanation, *candidate.exceptions]
+    )
+    if re.search(r"\bschedules?\b", context, re.I):
+        return "Schedule-dependent terms require separate review; no numeric rule was generated."
+    return None
+
+
+def verify_findings(
+    extraction: Extraction, pages: list[ExtractedPage], document_id: str
+) -> VerificationResult:
+    result = VerificationResult(findings=[])
     if not extraction.is_health_policy:
-        return []
+        return result
     originals = {p.page_number: p for p in pages}
-    results = []
     seen = set()
     for candidate in extraction.findings:
-        key = (candidate.condition_type, candidate.page, candidate.quote)
-        if key in seen:
-            continue
-        seen.add(key)
         page = originals.get(candidate.page)
         quote_ok = (
             page is not None and len(candidate.quote.strip()) >= 12 and candidate.quote in page.text
         )
+        if not quote_ok:
+            # Count every invalid input candidate, including repeated invalid citations.
+            # Neither its quote nor its interpretation becomes a policy finding.
+            result.rejected_count += 1
+            continue
+        key = (candidate.condition_type, candidate.page, candidate.quote)
+        if key in seen:
+            continue
+        seen.add(key)
+        review_reason = review_only_reason(candidate)
         rule = None
-        if quote_ok and not candidate.ambiguous and page.extraction_quality == "text_present":
+        if (
+            not candidate.ambiguous
+            and page.extraction_quality == "text_present"
+            and review_reason is None
+        ):
             quote = candidate.quote
             if candidate.condition_type == "co_payment":
                 percents = {Decimal(n) for n in re.findall(r"(?<![\d.])(\d+(?:\.\d+)?)\s*%", quote)}
@@ -217,44 +257,48 @@ def verify_findings(extraction: Extraction, pages: list[ExtractedPage], document
                         "treatment": candidate.treatment,
                         "basis": candidate.basis,
                     }
-        results.append(
+        result.findings.append(
             Finding(
                 id=str(uuid4()),
                 condition_type=candidate.condition_type,
                 status="found" if rule else "uncertain",
-                verification_status="needs_review" if quote_ok else "insufficient_evidence",
+                verification_status="needs_review",
                 title="Percentage co-payment"
                 if candidate.condition_type == "co_payment"
                 else "Treatment-specific sub-limit",
                 explanation=(
-                    candidate.explanation + " Applicability and exceptions require review."
-                )
-                if quote_ok
-                else "The proposed evidence could not be verified in the original page.",
+                    review_reason
+                    or candidate.explanation + " Applicability and exceptions require review."
+                ),
                 rule=rule,
-                applicability=candidate.applicability if quote_ok else None,
-                exceptions=candidate.exceptions if quote_ok else [],
-                source=Source(document_id=document_id, page=candidate.page, quote=candidate.quote)
-                if quote_ok
-                else None,
+                applicability=candidate.applicability,
+                exceptions=candidate.exceptions,
+                source=Source(document_id=document_id, page=candidate.page, quote=candidate.quote),
             )
         )
-    return results
+    return result
 
 
 async def analyze_job(gateway, extractor, principal, job_id):
     try:
         document_id, pages = await gateway.begin_analysis(principal, job_id)
         extraction = await extractor.extract(pages)
-        findings = verify_findings(extraction, pages, document_id)
+        verified = verify_findings(extraction, pages, document_id)
+        findings = verified.findings
         message = (
-            "AI extraction finished; applicability, exceptions and cross-document conflicts "
-            "require review. No claim calculations were performed."
+            "Source-backed findings retained for review. Applicability, exceptions and "
+            "cross-document conflicts remain unverified. No claim calculations were performed."
         )
         if not extraction.is_health_policy:
             message = "Health insurance scope could not be established; manual review required."
         elif not findings:
-            message = "No supported clauses extracted. This is not evidence of coverage."
+            message = "No source-backed findings retained; manual review required."
+        if verified.rejected_count or not findings or any(f.rule is None for f in findings):
+            message = "Analysis incomplete. " + message
+        message += (
+            f" Rejected candidates: {verified.rejected_count} (source verification failed)."
+            " This analysis does not establish the absence of exclusions or restrictions."
+        )
         if any(p.extraction_quality != "text_present" for p in pages):
             message += " Some pages require OCR or text review."
         await gateway.finish_analysis(principal, job_id, findings, code=None, message=message)
