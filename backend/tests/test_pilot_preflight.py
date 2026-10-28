@@ -14,10 +14,14 @@ from benchmarks.offline_clause_benchmark import BenchmarkError, LocalBenchmark, 
 from benchmarks.pilot_preflight import (
     MAX_INPUT_TOKENS_PER_REQUEST,
     MAX_OUTPUT_TOKENS_PER_REQUEST,
+    PILOT_MODEL,
+    PROVIDER_FORMATTING_RESERVE_TOKENS,
     ExactTokenCountUnavailable,
+    OfflineTokenBudgetUnavailable,
     PilotPreflightError,
     prepare_pilot_requests,
     require_exact_token_budget,
+    require_offline_token_budget,
 )
 
 
@@ -170,6 +174,92 @@ def test_request_count_and_output_reserve_are_hard_caps():
         require_exact_token_budget(requests, count_input_tokens=lambda payload: 100)
 
 
+def test_offline_guard_counts_full_request_and_reserves_output():
+    manifest, benchmark = synthetic_plan()
+    requests = prepare_pilot_requests(manifest, benchmark, model=PILOT_MODEL)
+    with (
+        patch("httpx.Client.request") as provider_request,
+        patch("requests.get") as asset_download,
+    ):
+        budgeted = require_offline_token_budget(requests)
+        provider_request.assert_not_called()
+        asset_download.assert_not_called()
+    assert len(budgeted) == 2
+    assert all(item.local_estimated_input_tokens > 0 for item in budgeted)
+    assert all(
+        item.formatting_reserve_tokens == PROVIDER_FORMATTING_RESERVE_TOKENS for item in budgeted
+    )
+    assert all(item.conservative_input_budget_tokens <= 6000 for item in budgeted)
+    assert all(
+        item.reserved_total_budget_tokens
+        == item.conservative_input_budget_tokens + MAX_OUTPUT_TOKENS_PER_REQUEST
+        for item in budgeted
+    )
+    assert all(item.safe_summary()["authoritative_input_tokens"] is None for item in budgeted)
+
+
+def test_offline_guard_rejects_oversized_passage_and_schema_change():
+    manifest, benchmark = synthetic_plan()
+    request = prepare_pilot_requests(manifest, benchmark, model=PILOT_MODEL)[0]
+    input_payload = json.loads(request.body["input"])
+    input_payload["primary_passages"][0]["text"] += "X" * 10_000
+    request.body["input"] = json.dumps(input_payload)
+    with pytest.raises(PilotPreflightError, match="offline budget"):
+        require_offline_token_budget((request,))
+
+    request = prepare_pilot_requests(manifest, benchmark, model=PILOT_MODEL)[0]
+    request.body["text"]["format"]["schema"]["description"] = "unsupported change"
+    with pytest.raises(PilotPreflightError, match="shape or model"):
+        require_offline_token_budget((request,))
+
+
+def test_schema_and_unicode_are_in_local_accounting():
+    manifest, benchmark = synthetic_plan()
+    request = prepare_pilot_requests(manifest, benchmark, model=PILOT_MODEL)[0]
+    budget = require_offline_token_budget((request,))[0]
+    without_schema = {key: value for key, value in request.body.items() if key != "text"}
+    smaller_bytes = len(json.dumps(without_schema, ensure_ascii=True).encode("utf-8"))
+    assert budget.serialized_max_utf8_bytes > smaller_bytes
+    assert "₹ and सीमा" in request.body["input"]
+    assert budget.serialized_max_utf8_bytes >= request.serialized_complete_request_bytes
+    assert "₹" not in str(budget.safe_summary())
+
+
+def test_missing_tokenizer_and_wrong_model_fail_closed():
+    manifest, benchmark = synthetic_plan()
+    requests = prepare_pilot_requests(manifest, benchmark, model=PILOT_MODEL)
+    with patch.dict("sys.modules", {"tiktoken": None}):
+        with pytest.raises(OfflineTokenBudgetUnavailable, match="tokenizer unavailable"):
+            require_offline_token_budget(requests)
+    wrong_model = prepare_pilot_requests(manifest, benchmark, model="gpt-4o")
+    with pytest.raises(PilotPreflightError, match="shape or model"):
+        require_offline_token_budget(wrong_model)
+
+
+def test_uncached_tokenizer_asset_fails_without_network(monkeypatch, tmp_path):
+    manifest, benchmark = synthetic_plan()
+    requests = prepare_pilot_requests(manifest, benchmark, model=PILOT_MODEL)
+    monkeypatch.setenv("TIKTOKEN_CACHE_DIR", str(tmp_path))
+    with patch("requests.get") as asset_download:
+        with pytest.raises(OfflineTokenBudgetUnavailable, match="tokenizer unavailable"):
+            require_offline_token_budget(requests)
+        asset_download.assert_not_called()
+
+
+def test_offline_total_request_budget_is_enforced(monkeypatch):
+    manifest, benchmark = synthetic_plan()
+    requests = prepare_pilot_requests(manifest, benchmark, model=PILOT_MODEL)
+    with pytest.raises(PilotPreflightError, match="request count"):
+        require_offline_token_budget(requests + (requests[0],))
+    budgeted = require_offline_token_budget(requests)
+    monkeypatch.setattr(
+        "benchmarks.pilot_preflight.MAX_TOTAL_PILOT_TOKENS",
+        sum(item.reserved_total_budget_tokens for item in budgeted) - 1,
+    )
+    with pytest.raises(PilotPreflightError, match="total offline budget"):
+        require_offline_token_budget(requests)
+
+
 @pytest.mark.skipif(
     not (os.getenv("OFFLINE_POLICY_PDF") and os.getenv("OFFLINE_CLAUSE_BENCHMARK")),
     reason="Local PDF and ignored benchmark file not provided",
@@ -195,5 +285,13 @@ def test_local_real_pdf_plan_is_two_passages_and_still_blocked():
     assert "ICU" in icu_item.evidence[0].excerpt
     assert "ICCU" in icu_item.evidence[0].excerpt
     assert "not associated medical expenses" in icu_item.qualifications
+    assert (
+        len(
+            require_offline_token_budget(
+                prepare_pilot_requests(manifest, benchmark, model=PILOT_MODEL, pdf_bytes=pdf_bytes)
+            )
+        )
+        == 2
+    )
     with pytest.raises(ExactTokenCountUnavailable):
         require_exact_token_budget(requests, count_input_tokens=None)

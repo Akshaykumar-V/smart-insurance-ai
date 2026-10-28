@@ -1,7 +1,8 @@
 """Report the disabled-provider two-request pilot plan without printing PDF text.
 
 Run from backend/: python -m scripts.run_pilot_preflight --pdf PDF --benchmark JSON
-This script never sends a provider request and always reports exact tokens unavailable.
+This script never sends a provider request. Local budget results are estimates,
+not authoritative complete-request token counts.
 """
 
 import argparse
@@ -13,10 +14,9 @@ from app.document_manifest import build_manifest
 from app.pdf import parse_isolated
 from benchmarks.offline_clause_benchmark import BenchmarkError, load_local_benchmark
 from benchmarks.pilot_preflight import (
-    ExactTokenCountUnavailable,
     PilotPreflightError,
     prepare_pilot_requests,
-    require_exact_token_budget,
+    require_offline_token_budget,
 )
 
 
@@ -29,14 +29,11 @@ def run(pdf_path: Path, benchmark_path: Path, *, settings: Settings) -> dict:
     requests = prepare_pilot_requests(
         manifest, benchmark, model=settings.openai_model, pdf_bytes=pdf_bytes
     )
-    try:
-        require_exact_token_budget(requests, count_input_tokens=None)
-    except ExactTokenCountUnavailable:
-        status = "blocked_exact_token_counter_unavailable"
-    else:
-        raise AssertionError("Offline preflight must never enable provider requests")
+    budgeted = require_offline_token_budget(requests)
     return {
-        "status": status,
+        "status": "passed_conservative_offline_policy",
+        "authoritative_token_count_available": False,
+        "provider_enabled": False,
         "provider_requests_sent": 0,
         "model": settings.openai_model,
         "physical_pages": len(manifest.pages),
@@ -44,7 +41,7 @@ def run(pdf_path: Path, benchmark_path: Path, *, settings: Settings) -> dict:
         "manual_review_pending": sum(
             item.manual_review_status == "pending" for item in benchmark.items
         ),
-        "requests": [request.safe_summary() for request in requests],
+        "requests": [item.safe_summary() for item in budgeted],
     }
 
 

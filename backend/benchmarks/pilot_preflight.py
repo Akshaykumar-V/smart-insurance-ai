@@ -1,12 +1,18 @@
 """Pure, disabled-provider preflight for at most two passage-level pilot requests.
 
-No network client, API key, or send function is present. Exact input tokens must
-come from a trusted counter supplied later; without one the gate fails closed.
+Local token counts are estimates. The offline policy uses a much larger byte
+allowance plus a formatting reserve; only the provider can give an exact count.
+No network client, API key, retry, or send function is present.
 """
 
+import copy
+import hashlib
 import json
+import os
+import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 from app.clause_discovery import DiscoveryBatch, plan_batches
 from app.document_manifest import DocumentManifest
@@ -18,6 +24,15 @@ MAX_INPUT_TOKENS_PER_REQUEST = 6000
 MAX_OUTPUT_TOKENS_PER_REQUEST = 800
 MAX_TOTAL_TOKENS_PER_REQUEST = 6800
 MAX_TOTAL_PILOT_TOKENS = 13600
+PILOT_MODEL = "gpt-4.1-mini"
+PILOT_ENCODING = "o200k_base"
+# Matches the pinned tiktoken release's public encoding asset. Validate the
+# cache before invoking tiktoken so offline preflight cannot fetch it on demand.
+_ENCODING_ASSET_URL = "https://openaipublic.blob.core.windows.net/encodings/o200k_base.tiktoken"
+_ENCODING_ASSET_SHA256 = "446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1a2d"
+# Policy allowance, not a documented maximum for provider-side formatting.
+PROVIDER_FORMATTING_RESERVE_TOKENS = 1600
+_REQUEST_FIELDS = {"model", "store", "instructions", "input", "max_output_tokens", "text"}
 
 PILOT_INSTRUCTIONS = (
     "Discover review-only insurance clauses in the single PRIMARY passage. "
@@ -90,6 +105,10 @@ class PilotPreflightError(ValueError):
 
 class ExactTokenCountUnavailable(PilotPreflightError):
     """No trusted complete-request token counter was supplied."""
+
+
+class OfflineTokenBudgetUnavailable(PilotPreflightError):
+    """A local tokenizer or conservative policy bound is unavailable."""
 
 
 @dataclass(frozen=True)
@@ -184,7 +203,7 @@ def prepare_pilot_requests(
                     "type": "json_schema",
                     "name": "offline_clause_pilot",
                     "strict": True,
-                    "schema": PILOT_SCHEMA,
+                    "schema": copy.deepcopy(PILOT_SCHEMA),
                 }
             },
         }
@@ -220,4 +239,115 @@ def require_exact_token_budget(
         counted.append(CountedPilotRequest(request, count))
     if sum(item.reserved_total_tokens for item in counted) > MAX_TOTAL_PILOT_TOKENS:
         raise PilotPreflightError("Pilot total token ceiling exceeded")
+    return tuple(counted)
+
+
+@dataclass(frozen=True)
+class OfflineBudgetRequest:
+    request: PreparedPilotRequest
+    local_estimated_input_tokens: int
+    serialized_max_utf8_bytes: int
+    formatting_reserve_tokens: int
+
+    @property
+    def conservative_input_budget_tokens(self) -> int:
+        return self.serialized_max_utf8_bytes + self.formatting_reserve_tokens
+
+    @property
+    def reserved_total_budget_tokens(self) -> int:
+        return self.conservative_input_budget_tokens + MAX_OUTPUT_TOKENS_PER_REQUEST
+
+    def safe_summary(self) -> dict:
+        return {
+            **self.request.safe_summary(),
+            "local_estimated_input_tokens": self.local_estimated_input_tokens,
+            "serialized_max_utf8_bytes": self.serialized_max_utf8_bytes,
+            "formatting_reserve_tokens": self.formatting_reserve_tokens,
+            "conservative_input_budget_tokens": self.conservative_input_budget_tokens,
+            "reserved_total_budget_tokens": self.reserved_total_budget_tokens,
+            "authoritative_input_tokens": None,
+        }
+
+
+def _offline_encoding():
+    try:
+        import tiktoken
+
+        if tiktoken.__version__ != "0.14.0":
+            raise OfflineTokenBudgetUnavailable("Unexpected tokenizer version")
+        if "TIKTOKEN_CACHE_DIR" in os.environ:
+            cache_dir = os.environ["TIKTOKEN_CACHE_DIR"]
+        elif "DATA_GYM_CACHE_DIR" in os.environ:
+            cache_dir = os.environ["DATA_GYM_CACHE_DIR"]
+        else:
+            cache_dir = str(Path(tempfile.gettempdir()) / "data-gym-cache")
+        if not cache_dir:
+            raise OfflineTokenBudgetUnavailable("Offline tokenizer cache disabled")
+        cache_key = hashlib.sha1(_ENCODING_ASSET_URL.encode("utf-8")).hexdigest()
+        cached_asset = Path(cache_dir) / cache_key
+        if (
+            not cached_asset.is_file()
+            or hashlib.sha256(cached_asset.read_bytes()).hexdigest() != _ENCODING_ASSET_SHA256
+        ):
+            raise OfflineTokenBudgetUnavailable("Offline tokenizer asset unavailable")
+        encoding = tiktoken.encoding_for_model(PILOT_MODEL)
+        if encoding.name != PILOT_ENCODING:
+            raise OfflineTokenBudgetUnavailable("Unexpected pilot tokenizer")
+        return encoding
+    except Exception:
+        raise OfflineTokenBudgetUnavailable("Compatible offline tokenizer unavailable") from None
+
+
+def require_offline_token_budget(
+    requests: tuple[PreparedPilotRequest, ...],
+) -> tuple[OfflineBudgetRequest, ...]:
+    """Apply a conservative offline policy; never label its result an exact count.
+
+    UTF-8 bytes cover all request-visible text and JSON schema. An extra 1,600
+    tokens are reserved for undocumented provider formatting. Because the
+    provider publishes no hard maximum for that overhead, this is an engineering
+    guard, not an authoritative guarantee or permission to send a request.
+    """
+    if not requests or len(requests) > MAX_REQUESTS:
+        raise PilotPreflightError("Pilot request count exceeds its ceiling")
+    encoding = _offline_encoding()
+    counted = []
+    for request in requests:
+        body = request.body
+        if (
+            set(body) != _REQUEST_FIELDS
+            or body.get("model") != PILOT_MODEL
+            or body.get("store") is not False
+            or body.get("max_output_tokens") != MAX_OUTPUT_TOKENS_PER_REQUEST
+            or body.get("instructions") != PILOT_INSTRUCTIONS
+            or body.get("text", {}).get("format", {}).get("schema") != PILOT_SCHEMA
+        ):
+            raise PilotPreflightError("Pilot request shape or model differs")
+        try:
+            passage_input = json.loads(body["input"])
+            if (
+                set(passage_input) != {"primary_passages", "context_passages"}
+                or len(passage_input["primary_passages"]) != 1
+                or passage_input["context_passages"] != []
+                or passage_input["primary_passages"][0]["passage_id"] != request.passage_id
+                or passage_input["primary_passages"][0]["page_number"] != request.page_number
+            ):
+                raise ValueError
+            plain = json.dumps(body, ensure_ascii=False, separators=(",", ":"))
+            ascii_escaped = json.dumps(body, ensure_ascii=True, separators=(",", ":"))
+            estimated = len(encoding.encode(plain))
+            byte_allowance = max(len(plain.encode("utf-8")), len(ascii_escaped.encode("utf-8")))
+        except Exception:
+            raise PilotPreflightError("Pilot request could not be counted offline") from None
+        item = OfflineBudgetRequest(
+            request, estimated, byte_allowance, PROVIDER_FORMATTING_RESERVE_TOKENS
+        )
+        if (
+            item.conservative_input_budget_tokens > MAX_INPUT_TOKENS_PER_REQUEST
+            or item.reserved_total_budget_tokens > MAX_TOTAL_TOKENS_PER_REQUEST
+        ):
+            raise PilotPreflightError("Pilot request exceeds its offline budget")
+        counted.append(item)
+    if sum(item.reserved_total_budget_tokens for item in counted) > MAX_TOTAL_PILOT_TOKENS:
+        raise PilotPreflightError("Pilot total offline budget exceeded")
     return tuple(counted)

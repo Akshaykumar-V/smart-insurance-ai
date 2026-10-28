@@ -56,14 +56,26 @@ From `backend/`, run:
 .\.venv\Scripts\python.exe -m scripts.run_pilot_preflight --pdf <local-public-pdf> --benchmark local_benchmarks\hdfc_optima_secure_benchmark.json
 ```
 
-The report contains byte sizes and identifiers, never passage text. Byte sizes
-are diagnostics, **not token counts**. The exact-token gate deliberately fails
-closed while no reliable complete-request counter is configured. A future
-pilot must count the exact input payload using a trusted counter that accounts
-for instructions, schema, and passage text; reserve output tokens separately;
-and reject oversized requests before sending. Manual annotation approval and
-explicit authorization are still required before any paid call. Do not retry
-paid requests automatically or write to the database or live extraction path.
+The report contains counts, byte sizes, and identifiers, never passage text.
+`tiktoken` maps the configured `gpt-4.1-mini` model to `o200k_base` and supplies
+a **local estimate**, not a provider count. The offline gate also counts the
+complete request as UTF-8 bytes (including instructions, passage input, schema,
+and JSON structure), using the larger of literal and ASCII-escaped forms. It
+adds a **1,600-token formatting allowance**, reserves the full **800 output
+tokens**, and rejects requests above the configured limits. Missing tokenizer,
+wrong model, changed request shape, or oversized requests fail closed. The
+tokenizer is a pinned development-only dependency. Its public `o200k_base`
+encoding asset must already be present in tiktoken's cache and match the pinned
+hash; a missing or altered asset fails closed before tokenizer initialization.
+The preflight does not download it.
+
+The byte allowance is intentionally much larger than the local token estimate.
+It is an engineering policy, **not a documented upper bound on provider-side
+formatting**. Only the provider's input-token count can establish the exact
+complete-request count; no provider call is made here. Passing the offline
+policy does not authorize a paid request. Manual annotation approval and
+explicit authorization are still required before any pilot. Do not retry paid
+requests automatically or write to the database or live extraction path.
 
 Every candidate must pass the exact passage anchorer. Save only local ignored
 evaluation material and content-free counts; do not log PDF text or rejected
