@@ -4,6 +4,7 @@ import pymupdf
 import pytest
 from conftest import make_pdf
 
+from app.config import Settings
 from app.errors import ApiError
 from app.pdf import parse_isolated
 from app.pdf_worker import parse_pdf
@@ -57,6 +58,25 @@ def test_process_roundtrip_preserves_pages(pdf_bytes, settings):
     assert result.page_count == 2
     assert [p.page_number for p in result.pages] == [1, 2]
     assert result.pages[0].text == "Fictional wording. Printed page 99.\n"
+
+
+def test_process_roundtrip_preserves_non_cp1252_text(monkeypatch):
+    with pymupdf.open() as document:
+        page = document.new_page()
+        page.insert_htmlbox(
+            pymupdf.Rect(50, 50, 550, 200),
+            "<p>Fictional clause: &#8377;40,000 limit and Greek &#945;.</p>",
+        )
+        data = document.tobytes()
+    settings = Settings(_env_file=None, max_upload_bytes=1_000_000)
+    expected = parse_pdf(data, settings.max_pdf_pages, settings.max_extracted_characters, True)
+    assert "\u20b9" in expected.pages[0].text
+    assert "\u03b1" in expected.pages[0].text
+
+    monkeypatch.setenv("PYTHONIOENCODING", "cp1252")
+    actual = parse_isolated(data, settings, extract=True)
+    assert actual.page_count == 1
+    assert actual.pages[0].text == expected.pages[0].text
 
 
 @pytest.mark.parametrize(("returncode", "output"), [(1, b""), (0, b"invalid json"), (0, b"{}")])

@@ -64,7 +64,7 @@ if __name__ == "__main__":
             int(sys.argv[2]),
             sys.argv[3] == "extract",
         )
-        print(result.model_dump_json())
+        sys.stdout.buffer.write(result.model_dump_json().encode("utf-8") + b"\n")
     except ApiError as exc:
         print(
             json.dumps({"error": {"status": exc.status, "code": exc.code, "message": exc.message}})
