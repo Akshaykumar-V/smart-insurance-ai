@@ -4,7 +4,7 @@ import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { AlertCircle, ArrowLeft, ArrowRight, BookOpen, ChevronRight, FileSearch, Info, RefreshCw, Sparkles } from "lucide-react";
 import { mockPolicyClient, type PolicyClient } from "@/lib/policy-client";
-import { analysisLabels, conditionGroups, PolicyDataError, reportAvailability, type FindingsResponse, type PolicyDetails } from "@/lib/policy-intelligence";
+import { analysisLabels, conditionGroups, findingsAvailability, PolicyDataError, type FindingsResponse, type PolicyDetails } from "@/lib/policy-intelligence";
 import { WorkspaceShell } from "./workspace-shell";
 import { PolicyDetailsContent } from "./policy-details";
 import { FindingCard } from "./finding-card";
@@ -26,7 +26,7 @@ function IntelligenceReport({ policy, client, refreshPolicy }: { policy: PolicyD
   const [simulatorOpen, setSimulatorOpen] = useState(false);
   const [state, setState] = useState<LoadState<FindingsResponse>>({ status: "loading" });
   const [attempt, setAttempt] = useState(0);
-  const availability = reportAvailability(policy);
+  const availability = findingsAvailability(policy, client.mode);
   useEffect(() => {
     if (!availability.available) return;
     const controller = new AbortController();
@@ -44,6 +44,7 @@ function IntelligenceReport({ policy, client, refreshPolicy }: { policy: PolicyD
   if (state.status === "error") return <ErrorPanel error={state.error} retry={() => setAttempt(value => value + 1)} />;
   const report = state.data;
   return <>
+    {availability.reviewOnly && <div className="report-note attention"><AlertCircle size={19} /><p>{availability.message}</p></div>}
     <section className="report-intro"><div className="report-intro-icon"><Sparkles size={23} /></div><div><span className="eyebrow">SIX AREAS. THE CONTEXT BEHIND EACH.</span><h2>Understand the conditions, not just the cover.</h2><p>Read the interpretation alongside the source, applicability and exceptions. A condition found in a policy is not automatically applicable to your situation.</p></div></section>
     {client.mode === "mock" ? <>
       <div className="claim-entry"><div><strong>What could these conditions mean for a hypothetical bill?</strong><p>Explore co-payment and treatment-cap effects with explicit assumptions.</p></div><button className="button primary" aria-expanded={simulatorOpen} aria-controls="claim-simulator" onClick={() => setSimulatorOpen(value => !value)}>{simulatorOpen ? "Hide simulator" : "Simulate Claim Impact"}<ArrowRight size={16} /></button></div>

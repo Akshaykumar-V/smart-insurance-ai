@@ -106,6 +106,22 @@ export function reportAvailability(policy: PolicyDetails): { available: boolean;
   return { available: true, title: "Report available", message: "Read each finding with its applicability, exceptions and source evidence." };
 }
 
+// Reading persisted evidence does not establish eligibility for specialized analysis.
+// Keep reportAvailability strict because the fictional calculator also uses it.
+export function findingsAvailability(policy: PolicyDetails, mode: "mock" | "api"): { available: boolean; reviewOnly: boolean; title: string; message: string } {
+  const eligibility = reportAvailability(policy);
+  if (eligibility.available || mode !== "api") return { ...eligibility, reviewOnly: false };
+  if (policy.category === "other" && policy.policy_type === "unknown" && policy.analysis_status === "needs_review") {
+    return {
+      available: true,
+      reviewOnly: true,
+      title: "Extracted evidence available for review",
+      message: "Policy category and type are unconfirmed. Any extracted findings shown here need review and do not establish eligibility for specialized analysis.",
+    };
+  }
+  return { ...eligibility, reviewOnly: false };
+}
+
 export function missingInformation(policy: PolicyDetails): string[] {
   const missing: string[] = [];
   if (!policy.documents.some(doc => doc.type === "policy_schedule")) missing.push("No policy schedule is attached. Personal cover details and applicability may remain unknown.");

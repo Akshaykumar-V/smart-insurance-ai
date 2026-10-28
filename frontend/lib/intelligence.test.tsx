@@ -6,7 +6,7 @@ import { FindingCard } from "../components/finding-card";
 import { PolicyDetailsContent } from "../components/policy-details";
 import { mockFamilyReport, mockPolicyDetails } from "./mock-intelligence";
 import { createApiPolicyClient, mockPolicyClient } from "./policy-client";
-import { conditionGroups, findingCautions, missingInformation, parseFindings, parsePolicyDetails, PolicyDataError, reportAvailability, sourceReference, type Finding } from "./policy-intelligence";
+import { conditionGroups, findingCautions, findingsAvailability, missingInformation, parseFindings, parsePolicyDetails, PolicyDataError, reportAvailability, sourceReference, type Finding } from "./policy-intelligence";
 
 const family = mockPolicyDetails.find(policy => policy.id === "demo-health-family")!;
 const individual = mockPolicyDetails.find(policy => policy.id === "demo-health-individual")!;
@@ -59,6 +59,21 @@ test("report eligibility blocks wallet-only, unknown types and nonterminal analy
   assert.equal(reportAvailability({ ...family, analysis_status: "needs_review" }).available, true);
   for (const patch of [{ category: "life" as const }, { category: "vehicle" as const }, { policy_type: "unknown" as const }, { policy_type: "other" as const }, ...(["not_started", "processing", "failed", "unsupported"] as const).map(analysis_status => ({ analysis_status }))]) {
     assert.equal(reportAvailability({ ...family, ...patch }).available, false);
+  }
+});
+
+test("unclassified live policy can read review-required evidence without becoming analysis-eligible", () => {
+  const placeholder = { ...family, category: "other" as const, policy_type: "unknown" as const, analysis_status: "needs_review" as const };
+  assert.equal(reportAvailability(placeholder).available, false);
+  assert.deepEqual(findingsAvailability(placeholder, "api"), {
+    available: true,
+    reviewOnly: true,
+    title: "Extracted evidence available for review",
+    message: "Policy category and type are unconfirmed. Any extracted findings shown here need review and do not establish eligibility for specialized analysis.",
+  });
+  assert.equal(findingsAvailability(placeholder, "mock").available, false);
+  for (const patch of [{ category: "life" as const }, { category: "vehicle" as const }, { policy_type: "other" as const }, { analysis_status: "unsupported" as const }, { analysis_status: "processing" as const }, { analysis_status: "failed" as const }]) {
+    assert.equal(findingsAvailability({ ...placeholder, ...patch }, "api").available, false);
   }
 });
 
