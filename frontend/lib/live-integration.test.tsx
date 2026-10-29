@@ -1,3 +1,4 @@
+import { demoPolicyId, demoDocumentId, demoJobId } from "./mock-condition-extraction";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import React from "react";
@@ -341,4 +342,59 @@ test("sign-out cancels the prepared wallet reader and prevents subsequent reads"
     await start; await f.controller.signOut(); await rejected;
     await assert.rejects(clients.walletClient.listPolicies(), AuthRequiredError);
   } finally { globalThis.fetch = original; f.controller.dispose(); }
+});
+
+
+const conditionIdentity = { policy_id: demoPolicyId, document_id: demoDocumentId, job_id: demoJobId("success") };
+test("condition feature defaults off and guards every method before network access", async () => {
+ assert.equal(config.conditionExtractionsEnabled,false);
+ assert.throws(()=>parseAppConfig({...env,NEXT_PUBLIC_CONDITION_EXTRACTIONS_ENABLED:"yes"}),/must be true or false/);
+ const f=fakeAuth();await f.controller.start();const clients=createLiveClients(config,f.controller,"owner-a");
+ const original=globalThis.fetch;globalThis.fetch=async()=>assert.fail("Inactive endpoints must not be called");
+ try {
+  await assert.rejects(clients.conditionClient.extract(demoPolicyId,{document_id:demoDocumentId},signal()),/not enabled/);
+  await assert.rejects(clients.conditionClient.getJob(conditionIdentity,signal()),/not enabled/);
+  await assert.rejects(clients.conditionClient.getRun(conditionIdentity,signal()),/not enabled/);
+  const disabled=renderToStaticMarkup(<LiveWorkspace config={config} auth={f.controller} user={session().user} conditionExtraction />);
+  assert.match(disabled,/Condition extraction is disabled/);assert.doesNotMatch(disabled,/Extract Conditions|fictional-condition|Typed mock preview/);
+ } finally {globalThis.fetch=original;f.controller.dispose();}
+});
+
+test("condition 401 expires the session and 403 retains it for all three adapter operations", async () => {
+ const original=globalThis.fetch;
+ try {
+  for(const status of [401,403]) for(const action of ["extract","job","conditions"]) {
+   const f=fakeAuth();await f.controller.start();const clients=createLiveClients({...config,conditionExtractionsEnabled:true},f.controller,"owner-a");
+   let calls=0;globalThis.fetch=async()=>{calls++;return new Response(null,{status});};
+   const request=action==="extract" ? clients.conditionClient.extract(demoPolicyId,{document_id:demoDocumentId},signal()) : action==="job" ? clients.conditionClient.getJob(conditionIdentity,signal()) : clients.conditionClient.getRun(conditionIdentity,signal());
+   await assert.rejects(request);assert.equal(calls,1);
+   assert.equal(f.controller.getSnapshot().status,status===401?"signed_out":"signed_in");f.controller.dispose();
+  }
+ } finally {globalThis.fetch=original;}
+});
+
+test("condition client reads rotated tokens and rejects requests from an old account", async () => {
+ const f=fakeAuth();await f.controller.start();const clients=createLiveClients({...config,conditionExtractionsEnabled:true},f.controller,"owner-a");
+ const original=globalThis.fetch;const tokens:string[]=[];
+ globalThis.fetch=async(_url,init)=>{tokens.push((init?.headers as Record<string,string>).Authorization);return Response.json({job_id:conditionIdentity.job_id,policy_id:demoPolicyId,status:"processing",stage:"analyzing",message:null,error:null});};
+ try {
+  await clients.conditionClient.getJob(conditionIdentity,signal());f.emit(session("owner-a","rotated-condition-token"));
+  await clients.conditionClient.getJob(conditionIdentity,signal());
+  assert.deepEqual(tokens,["Bearer fictional-token","Bearer rotated-condition-token"]);
+  f.emit(session("owner-b","other-owner-token"));await assert.rejects(clients.conditionClient.getJob(conditionIdentity,signal()),AuthRequiredError);
+  assert.equal(tokens.length,2);
+ } finally {globalThis.fetch=original;f.controller.dispose();}
+});
+
+test("sign-out aborts condition POST without replay and enabled UI mounts no automatic requests", async () => {
+ const f=fakeAuth();await f.controller.start();const enabled={...config,conditionExtractionsEnabled:true};const clients=createLiveClients(enabled,f.controller,"owner-a");
+ const original=globalThis.fetch;let started!:()=>void;let calls=0;const ready=new Promise<void>(resolve=>{started=resolve;});
+ globalThis.fetch=async(_url,init)=>new Promise<Response>((_resolve,reject)=>{calls++;init?.signal?.addEventListener("abort",()=>reject(new DOMException("Aborted","AbortError")),{once:true});started();});
+ try {
+  const html=renderToStaticMarkup(<LiveWorkspace config={enabled} auth={f.controller} user={session().user} conditionExtraction />);
+  assert.match(html,/Authenticated condition extraction/);assert.doesNotMatch(html,/Typed mock preview|Fictional extraction outcome/);assert.equal(calls,0);
+  const rejected=assert.rejects(clients.conditionClient.extract(demoPolicyId,{document_id:demoDocumentId},signal()),{name:"AbortError"});
+  await ready;await f.controller.signOut();await rejected;assert.equal(calls,1);
+  await assert.rejects(clients.conditionClient.getRun(conditionIdentity,signal()),AuthRequiredError);assert.equal(calls,1);
+ } finally {globalThis.fetch=original;f.controller.dispose();}
 });

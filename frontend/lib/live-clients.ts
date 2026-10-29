@@ -1,3 +1,5 @@
+import { createApiConditionClient } from "./condition-client";
+import { ConditionError, type ConditionClient } from "./condition-extraction";
 import type { LiveConfig } from "./app-config";
 import { AuthSessionController } from "./auth-session";
 import { createApiUploadClient } from "./upload-client";
@@ -10,6 +12,7 @@ export function createLiveClients(config: LiveConfig, auth: AuthSessionControlle
   const getAccessToken = () => auth.getAccessToken(ownerId);
   const upload = createApiUploadClient(config.backendOrigin, getAccessToken);
   const policy = createApiPolicyClient(config.backendOrigin, getAccessToken);
+  const conditions = createApiConditionClient(config.backendOrigin, getAccessToken);
   const wallet = createApiWalletClient(config.backendOrigin, getAccessToken);
   async function guarded<T>(signal: AbortSignal, run: (scope: AbortSignal) => Promise<T>): Promise<T> {
     const scope = auth.requestSignal(ownerId, signal);
@@ -18,7 +21,7 @@ export function createLiveClients(config: LiveConfig, auth: AuthSessionControlle
       scope.throwIfAborted();
       return result;
     } catch (error) {
-      if (!scope.aborted && ((error instanceof UploadError && error.status === 401) || (error instanceof PolicyDataError && error.status === 401))) auth.expire();
+      if (!scope.aborted && ((error instanceof UploadError && error.status === 401) || (error instanceof PolicyDataError && error.status === 401) || (error instanceof ConditionError && error.status === 401))) auth.expire();
       throw error;
     }
   }
@@ -44,6 +47,16 @@ export function createLiveClients(config: LiveConfig, auth: AuthSessionControlle
       return guarded(signal ?? new AbortController().signal, scope => wallet.listPolicies(scope));
     },
   };
+  function conditionGuard<T>(signal: AbortSignal, run: (scope: AbortSignal) => Promise<T>) {
+    if (!config.conditionExtractionsEnabled) return Promise.reject(new ConditionError("Condition extraction is not enabled. No request was sent."));
+    return guarded(signal, run);
+  }
+  const conditionClient: ConditionClient = {
+    mode: "api",
+    extract: (id, request, signal) => conditionGuard(signal, scope => conditions.extract(id, request, scope)),
+    getJob: (identity, signal) => conditionGuard(signal, scope => conditions.getJob(identity, scope)),
+    getRun: (identity, signal) => conditionGuard(signal, scope => conditions.getRun(identity, scope)),
+  };
   // The local claim simulator remains demo-only; the backend has no live simulation endpoint in use.
-  return { uploadClient, policyClient, walletClient, getAccessToken };
+  return { uploadClient, policyClient, walletClient, conditionClient, getAccessToken };
 }

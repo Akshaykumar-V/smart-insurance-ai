@@ -5,6 +5,7 @@ export interface LiveConfig {
   supabasePublicKey: string;
   backendOrigin: string;
   policyReadsEnabled: boolean;
+  conditionExtractionsEnabled?: boolean;
 }
 
 function origin(value: string | undefined, name: string, allowPrivateLan = false): string {
@@ -38,13 +39,16 @@ export function parseAppConfig(env: Record<string, string | undefined>): AppConf
   if (!publicKey) throw new Error("Set a Supabase public publishable or legacy anon key. Secret and service-role keys must never be used in frontend configuration.");
   const reads = env.NEXT_PUBLIC_POLICY_READS_ENABLED || "false";
   if (!["true", "false"].includes(reads)) throw new Error("NEXT_PUBLIC_POLICY_READS_ENABLED must be true or false.");
-  return { mode, supabaseUrl, supabasePublicKey: key, backendOrigin, policyReadsEnabled: reads === "true" };
+  const conditions = env.NEXT_PUBLIC_CONDITION_EXTRACTIONS_ENABLED || "false";
+  if (!["true", "false"].includes(conditions)) throw new Error("NEXT_PUBLIC_CONDITION_EXTRACTIONS_ENABLED must be true or false.");
+  return { mode, supabaseUrl, supabasePublicKey: key, backendOrigin, conditionExtractionsEnabled: conditions === "true", policyReadsEnabled: reads === "true" };
 }
 
 export function readAppConfig(): AppConfig {
   // Keep literal property accesses: Next.js does not inline dynamic env lookups.
   return parseAppConfig({
     NEXT_PUBLIC_APP_MODE: process.env.NEXT_PUBLIC_APP_MODE,
+    NEXT_PUBLIC_CONDITION_EXTRACTIONS_ENABLED: process.env.NEXT_PUBLIC_CONDITION_EXTRACTIONS_ENABLED,
     NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
     NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
     NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,

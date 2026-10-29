@@ -1,0 +1,8 @@
+ .condition-controls { display: grid; gap: 14px; margin: 24px 0; }
+.condition-controls form { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.condition-controls input, .condition-controls select { padding: 10px; border: 1px solid #cbd5d1; border-radius: 8px; max-width: 100%; }
+.condition-preview-card { margin: 16px 0; overflow-wrap: anywhere; }
+.condition-preview-card h4 { margin-top: 18px; }
+.condition-preview-card figure { margin: 16px 0; }
+.condition-preview-card blockquote { white-space: pre-wrap; border-left: 3px solid #648979; padding: 12px; background: #f4f7f5; margin: 8px 0; }
+@media (max-width: 640px) { .condition-controls form { align-items: stretch; flex-direction: column; } }

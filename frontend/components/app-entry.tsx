@@ -1,4 +1,5 @@
 "use client";
+import { ConditionExtractionWorkspace } from "./condition-extraction-workspace";
 
 import React, { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { readAppConfig, type LiveConfig } from "@/lib/app-config";
@@ -11,17 +12,17 @@ import { LiveWorkspace } from "./live-workspace";
 
 export interface PolicyRoute { policyId: string; view: "details" | "findings" }
 
-export function AppEntry({ route }: { route?: PolicyRoute }) {
+export function AppEntry({ route, conditionExtraction = false }: { route?: PolicyRoute; conditionExtraction?: boolean }) {
   const settings = useMemo(() => {
     try { return { config: readAppConfig(), error: "" }; }
     catch (error) { return { config: null, error: error instanceof Error ? error.message : "Live configuration is invalid." }; }
   }, []);
   if (!settings.config) return <WorkspaceShell mode="api" section="Configuration"><div className="empty-state" role="alert"><h1>Live configuration is incomplete</h1><p>{settings.error}</p><p>Supply the public settings in your local environment, then restart or rebuild the frontend.</p></div></WorkspaceShell>;
-  if (settings.config.mode === "demo") return route ? <PolicyWorkspace key={route.policyId} {...route} /> : <Wallet />;
-  return <LiveBoundary config={settings.config} route={route} />;
+  if (settings.config.mode === "demo") return conditionExtraction ? <ConditionExtractionWorkspace /> : route ? <PolicyWorkspace key={route.policyId} {...route} /> : <Wallet />;
+  return <LiveBoundary config={settings.config} route={route} conditionExtraction={conditionExtraction} />;
 }
 
-function LiveBoundary({ config, route }: { config: LiveConfig; route?: PolicyRoute }) {
+function LiveBoundary({ config, route, conditionExtraction }: { config: LiveConfig; route?: PolicyRoute; conditionExtraction?: boolean }) {
   const [auth, setAuth] = useState<AuthSessionController | null>(null);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
@@ -35,13 +36,13 @@ function LiveBoundary({ config, route }: { config: LiveConfig; route?: PolicyRou
     }).catch(() => { if (!cancelled) setFailed(true); });
     return () => { cancelled = true; controller?.dispose(); };
   }, [config]);
-  if (auth) return <AuthGate auth={auth} config={config} route={route} />;
+  if (auth) return <AuthGate auth={auth} config={config} route={route} conditionExtraction={conditionExtraction} />;
   return <WorkspaceShell mode="api" section="Sign in"><div className="empty-state" role={failed ? "alert" : "status"}>{failed ? "Authentication could not initialize. Check public configuration and reload." : "Loading authentication…"}</div></WorkspaceShell>;
 }
 
-function AuthGate({ auth, config, route }: { auth: AuthSessionController; config: LiveConfig; route?: PolicyRoute }) {
+function AuthGate({ auth, config, route, conditionExtraction }: { auth: AuthSessionController; config: LiveConfig; route?: PolicyRoute; conditionExtraction?: boolean }) {
   const state = useSyncExternalStore(auth.subscribe, auth.getSnapshot, auth.getSnapshot);
-  if (state.status === "signed_in") return <LiveWorkspace key={state.user.id} auth={auth} user={state.user} config={config} route={route} />;
+  if (state.status === "signed_in") return <LiveWorkspace key={state.user.id} auth={auth} user={state.user} config={config} route={route} conditionExtraction={conditionExtraction} />;
   return <WorkspaceShell mode="api" section="Sign in">{state.status === "loading" ? <p role="status">Checking your session…</p> : <SignInForm auth={auth} message={state.message} />}</WorkspaceShell>;
 }
 

@@ -2,9 +2,9 @@ import { PolicyDataError } from "./policy-intelligence";
 
 // Transport only: callers validate unknown JSON against the shared v0.1 contract.
 // Creating a reader never probes an endpoint or supplies demo fallbacks.
-export function createPolicyReader(baseUrl: string, getAccessToken: () => Promise<string>) {
+export function createPolicyTransport(baseUrl: string, getAccessToken: () => Promise<string>) {
   const origin = baseUrl.replace(/\/$/, "");
-  return async function request(path: string, signal: AbortSignal): Promise<unknown> {
+  return async function request(path: string, signal: AbortSignal, options: { method?: "GET" | "POST"; json?: unknown; expectedStatus?: 200 | 202 } = {}): Promise<unknown> {
     signal.throwIfAborted();
     const token = await getAccessToken();
     signal.throwIfAborted();
@@ -14,7 +14,11 @@ export function createPolicyReader(baseUrl: string, getAccessToken: () => Promis
     signal.addEventListener("abort", abort, { once: true });
     const timeout = setTimeout(abort, 30_000);
     try {
-      const response = await fetch(`${origin}${path}`, { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal, cache: "no-store" });
+      const response = await fetch(`${origin}${path}`, {
+        method: options.method ?? "GET", body: options.json === undefined ? undefined : JSON.stringify(options.json),
+        headers: options.json === undefined ? { Authorization: `Bearer ${token}` } : { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        signal: controller.signal, cache: "no-store",
+      });
       if (!response.ok) {
         const messages: Record<number, string> = {
           401: "Your session has expired. Sign in again to view policies.",
@@ -24,7 +28,7 @@ export function createPolicyReader(baseUrl: string, getAccessToken: () => Promis
         };
         throw new PolicyDataError(messages[response.status] ?? "The policy service is unavailable. Please try again.", response.status);
       }
-      if (response.status !== 200) throw new PolicyDataError("The service returned an unexpected response status.");
+      if (response.status !== (options.expectedStatus ?? 200)) throw new PolicyDataError("The service returned an unexpected response status.");
       let data: unknown;
       try { data = await response.json(); }
       catch { throw new PolicyDataError("The service returned unreadable policy data."); }
@@ -32,6 +36,7 @@ export function createPolicyReader(baseUrl: string, getAccessToken: () => Promis
       return data;
     } catch (error) {
       if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+      if (options.method === "POST") throw new PolicyDataError(error instanceof PolicyDataError ? `${error.message} Extraction acceptance is unconfirmed; check existing jobs before sending again.` : "The request timed out or the connection was interrupted. Extraction acceptance is unconfirmed; check existing jobs before sending again.", error instanceof PolicyDataError ? error.status : undefined);
       if (controller.signal.aborted) throw new PolicyDataError("The request timed out or the connection was interrupted. Please try again.");
       if (error instanceof PolicyDataError) throw error;
       throw new PolicyDataError("The request timed out or the connection was interrupted. Please try again.");
@@ -40,4 +45,10 @@ export function createPolicyReader(baseUrl: string, getAccessToken: () => Promis
       signal.removeEventListener("abort", abort);
     }
   };
+}
+
+// Existing policy readers retain their exact GET-only interface.
+export function createPolicyReader(baseUrl: string, getAccessToken: () => Promise<string>) {
+ const request = createPolicyTransport(baseUrl, getAccessToken);
+ return (path: string, signal: AbortSignal) => request(path, signal);
 }

@@ -105,3 +105,20 @@ Do **not** display a complete insurer payout without all adjustments. Complex re
 
 ## Coordination rule
 Changes to paths, status enums, fields, money unit, auth, or page numbering require editing THIS file first, informing both laptops and updating any typed client. If a real backend implementation already exists, reconcile this contract before changing source code.
+
+
+## 10. Additive claim-affecting condition extraction (Feature 1)
+
+Final backend schema: https://github.com/Akshaykumar-V/smart-insurance-ai/issues/1#issuecomment-6494218395
+
+This addition preserves all v0.1 upload/findings/simulator behavior. Routes remain disabled/unregistered until explicitly enabled by the backend; schema agreement is not permission to make live extraction calls.
+
+- POST `/api/v1/policies/{policy_id}/condition-extractions`, JSON `{ "document_id": "<uuid>" }`, returns HTTP 202 with policy_id, document_id, job_id and JobStatus. A duplicate start returns the existing job's current status, not necessarily queued. Never automatically retry a POST after unknown acceptance.
+- GET `/api/v1/jobs/{job_id}` uses the existing authenticated JobResponse and ownership checks.
+- GET `/api/v1/policies/{policy_id}/conditions?job_id=<uuid>` returns exactly the selected run, never a latest-run fallback. Missing/foreign runs return 404.
+- Run fields: policy_id/document_id/job_id UUIDs, status JobStatus, analysis_state complete|incomplete|null, warning string|null, rejected_candidate_count nonnegative integer, conditions array. Analysis state is null for queued/processing/failed. Failed and incomplete runs require non-empty content-free warnings. Successful zero-condition runs are incomplete with a warning.
+- Condition fields: id `condition_` plus 20 lowercase hex characters; document_id/job_id matching the run; category uses the six ConditionType values; kind benefit|restriction|condition|definition|procedural_requirement|other; non-empty title; specific_label/applicability string|null; observed_value_mentions/exceptions string arrays; dependencies objects `{kind: policy_schedule|endorsement|other_clause, label?: string|null}` (omitted label defaults null; unknown dependency keys rejected); evidence array of 1-6 entries; literal source_verified=true and review_required=true.
+- Evidence: opaque non-empty passage_id, physical 1-indexed page 1-200, zero-based Unicode-code-point start-inclusive/end-exclusive offsets with end>start, exact anchored quote of at least 12 characters. Frontend must not normalize or re-slice quotations. Backend anchors evidence and literal value mentions; source verification is not insurer certification.
+- Complete means planned passages processed, not exhaustive discovery. No financial rule/calculation field is added. Historical job discovery remains separate; explicit known job IDs support retrieval now.
+
+The additive shared TypeScript models are in `frontend_api_types.ts`; frontend boundary and adapter documentation is in `frontend/CONDITION_EXTRACTION_CONTRACT.md`.

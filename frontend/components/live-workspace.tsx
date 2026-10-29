@@ -1,4 +1,5 @@
 "use client";
+import { ConditionExtractionWorkspace } from "./condition-extraction-workspace";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
@@ -13,7 +14,7 @@ import { Wallet } from "./wallet";
 import { PolicyWorkspace } from "./policy-workspace";
 import type { PolicyRoute } from "./app-entry";
 
-export function LiveWorkspace({ auth, user, config, route }: { auth: AuthSessionController; user: AuthSession["user"]; config: LiveConfig; route?: PolicyRoute }) {
+export function LiveWorkspace({ auth, user, config, route, conditionExtraction }: { auth: AuthSessionController; user: AuthSession["user"]; config: LiveConfig; route?: PolicyRoute; conditionExtraction?: boolean }) {
   const clients = useMemo(() => createLiveClients(config, auth, user.id), [config, auth, user.id]);
   const [open, setOpen] = useState(false);
   const [receipt, setReceipt] = useState<UploadResponse | null>(null);
@@ -41,6 +42,9 @@ export function LiveWorkspace({ auth, user, config, route }: { auth: AuthSession
     } finally { if (check.current === controller) { check.current = null; setChecking(false); } }
   }
   const account = <div className="live-account"><span>Signed in as {user.email || "authenticated user"}</span><button className="button secondary" onClick={() => void auth.signOut()}>Sign out</button></div>;
+  if (conditionExtraction) return config.conditionExtractionsEnabled
+    ? <>{account}<ConditionExtractionWorkspace client={clients.conditionClient} /></>
+    : <WorkspaceShell mode="api" section="Condition extraction">{account}<h1>Condition extraction is disabled</h1><p>No condition requests were sent. The backend routes must be activated before enabling this feature. No fictional results are substituted.</p></WorkspaceShell>;
   if (route && config.policyReadsEnabled) return <>{account}<PolicyWorkspace key={route.policyId} {...route} client={clients.policyClient} /></>;
   if (!route && config.policyReadsEnabled) return <Wallet client={clients.walletClient} uploadClient={clients.uploadClient} mode="api" accountSlot={account} />;
   return <><WorkspaceShell mode="api" section={route ? "Policy access" : "Live document upload"}>{account}

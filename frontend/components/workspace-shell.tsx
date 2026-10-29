@@ -12,6 +12,7 @@ export function WorkspaceShell({ children, section = "Insurance wallet", mode = 
       <nav aria-label="Main navigation">
         <Link className="nav-item selected" href="/" aria-current={section === "Insurance wallet" ? "page" : undefined}><WalletCards size={19} />Insurance wallet<span className="nav-dot" /></Link>
         <div className="nav-item upcoming"><Sparkles size={19} /><span>Claim simulator<small>In health policy reports</small></span></div>
+        <Link className="nav-item" href="/condition-extractions"><Sparkles size={19} />{demo ? "Conditions preview" : "Claim-affecting conditions"}</Link>
       </nav>
       <div className="sidebar-bottom">
         <div className="sidebar-tip"><span className="tip-icon"><ShieldCheck size={22} /></span><h3>Clarity starts with cover.</h3><p>Keep your policies together.<br />Understand the details that matter.</p></div>

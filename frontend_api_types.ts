@@ -54,3 +54,22 @@ export interface SimulatorResponse {
   missing_information: string[]; disclaimer: string;
 }
 export interface ApiError { error: { code: string; message: string; request_id?: string } }
+
+
+// Additive Feature 1 contract; issue #1 final backend alignment. Existing v0.1 DTOs are unchanged.
+export type ConditionKind = 'benefit' | 'restriction' | 'condition' | 'definition' | 'procedural_requirement' | 'other';
+export interface ConditionDependency { kind: 'policy_schedule' | 'endorsement' | 'other_clause'; label: string | null }
+export interface ConditionExtractionRequest { document_id: string }
+export interface ConditionExtractionAccepted { policy_id: string; document_id: string; job_id: string; status: JobStatus }
+export interface ConditionEvidence { passage_id: string; page: number; start: number; end: number; quote: string }
+export interface ExtractedCondition {
+ id: string; document_id: string; job_id: string; category: ConditionType; kind: ConditionKind;
+ title: string; specific_label: string | null; observed_value_mentions: string[]; applicability: string | null;
+ exceptions: string[]; dependencies: ConditionDependency[]; evidence: ConditionEvidence[];
+ source_verified: true; review_required: true;
+}
+export interface ConditionExtractionResponse {
+ policy_id: string; document_id: string; job_id: string; status: JobStatus;
+ analysis_state: 'complete' | 'incomplete' | null; warning: string | null;
+ rejected_candidate_count: number; conditions: ExtractedCondition[];
+}
