@@ -1,0 +1,11 @@
+diff --git a/backend/app/main.py b/backend/app/main.py
+--- a/backend/app/main.py
++++ b/backend/app/main.py
+@@ -17,2 +17,3 @@
+ from app.analysis import FindingsResponse, OpenAIExtractor, analyze_job
++from app.condition_routes import create_condition_router
+ from app.config import Settings
+@@ -287,2 +288,3 @@
+     app.openapi = contract_openapi
++    app.include_router(create_condition_router(current_user, settings))
+     return app

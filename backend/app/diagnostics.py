@@ -27,6 +27,10 @@ class Operation(StrEnum):
     FINISH_ANALYSIS = "finish_pdf_analysis"
     PAGE_LOOKUP = "page_lookup"
     FINDINGS_LOOKUP = "findings_lookup"
+    CONDITION_DOCUMENT = "condition_document"
+    CONDITION_PAGES = "condition_pages"
+    CONDITION_RUN = "condition_run"
+    CONDITION_RESULTS = "condition_results"
 
 
 # Exact membership, not a regex: arbitrary upstream strings must never reach logs.
